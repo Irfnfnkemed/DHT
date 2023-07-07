@@ -15,6 +15,8 @@ type Addr struct {
 	ID *big.Int
 }
 
+type Null struct{}
+
 type Node struct {
 	Online      bool
 	This        Addr
@@ -26,7 +28,7 @@ type Node struct {
 	Listener    net.Listener
 }
 
-func Get_hash(Addr_IP string) *big.Int {
+func get_hash(Addr_IP string) *big.Int {
 	hash := sha1.Sum([]byte(Addr_IP))
 	hashInt := new(big.Int)
 	return hashInt.SetBytes(hash[:])
@@ -35,7 +37,7 @@ func Get_hash(Addr_IP string) *big.Int {
 func (node *Node) Init(ip string) bool {
 	node.Online = false
 	node.This.IP = ip
-	node.This.ID = Get_hash(ip)
+	node.This.ID = get_hash(ip)
 	return true
 }
 
@@ -58,7 +60,7 @@ func (node *Node) Find_successor(id *big.Int, ip *string) error {
 		logrus.Errorf("Find_successor error (IP = %s): %v.", node.This.IP, err)
 		return err
 	}
-	err = Remote_call(pre_ip, "DHT.Get_successor", id, &ip)
+	err = Remote_call(pre_ip, "DHT.Get_successor", Null{}, &ip)
 	if err != nil {
 		logrus.Errorf("Find_successor error (IP = %s): %v.", node.This.IP, err)
 		return err
@@ -78,19 +80,28 @@ func (node *Node) Find_predecessor(id *big.Int, ip *string) error {
 	return nil
 }
 
-func (node *Node) Get_successor(ip *string) error {
+func (node *Node) Get_successor(addr *Addr) error {
 	node.Finger_lock.RLock()
-	*ip = node.Finger[1].IP
-	defer node.Finger_lock.Unlock()
+	*addr = node.Finger[1]
+	defer node.Finger_lock.RUnlock()
+	return nil
+}
+
+func (node *Node) Get_predecessor(addr *Addr) error {
+	node.Pre_lock.RLock()
+	*addr = node.Predecessor
+	defer node.Pre_lock.RUnlock()
 	return nil
 }
 
 func (node *Node) closest_preceding_finger(id *big.Int) string {
-	for i := 161; i > 0; i-- {
+	node.Finger_lock.RLock()
+	for i := 160; i > 0; i-- {
 		if belong(false, false, node.This.ID, node.Finger[i].ID, id) {
 			return node.Finger[i].IP
 		}
 	}
+	defer node.Finger_lock.RUnlock()
 	return node.This.IP
 }
 
@@ -116,4 +127,49 @@ func belong(left_open, right_open bool, beg, end, tar *big.Int) bool {
 		return left_open && right_open && cmp_tar_beg == 0
 	}
 	return false
+}
+
+func (node *Node) Join(ip string) bool {
+	defer func() { node.Online = true }()
+	defer node.Finger_lock.Unlock()
+	defer node.Pre_lock.Unlock()
+	logrus.Infof("New node (IP = %s, ID = %v) joins in.", node.This.IP, node.This.ID)
+	node.Pre_lock.Lock()
+	node.Predecessor = Addr{"", nil}
+	node.Finger_lock.Lock()
+	err := Remote_call(ip, "DHT.Find_successor", node.This.ID, &node.Finger[1])
+	if err != nil {
+		logrus.Errorf("Join error (IP = %s): %v.", node.This.IP, err)
+		return false
+	}
+	return true
+}
+
+func (node *Node) stabilize() error {
+	addr := Addr{"", nil}
+	node.Finger_lock.Lock()
+	defer node.Finger_lock.Unlock()
+	err := Remote_call(node.Finger[1].IP, "DHT.Get_successor", Null{}, &addr)
+	if err != nil {
+		logrus.Errorf("Stabilize error (IP = %s): %v.", node.This.IP, err)
+		return err
+	}
+	if addr.ID != nil && belong(false, false, node.This.ID, node.Finger[1].ID, addr.ID) {
+		node.Finger[1] = addr
+	}
+	err = Remote_call(node.Finger[1].IP, "DHT.Notifty", node.This, Null{})
+	if err != nil {
+		logrus.Errorf("Stabilize error (IP = %s): %v.", node.This.IP, err)
+		return err
+	}
+	return nil
+}
+
+func (node *Node) Notifty(addr Addr) error {
+	node.Finger_lock.Lock()
+	defer node.Finger_lock.Unlock()
+	if node.Predecessor.ID == nil || belong(false, false, node.Predecessor.ID, node.This.ID, addr.ID) {
+		node.Predecessor = addr
+	}
+	return nil
 }
