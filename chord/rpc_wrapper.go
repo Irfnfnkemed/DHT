@@ -5,25 +5,25 @@ import (
 )
 
 type RPC_wrapper struct {
-	node *Node
+	Core_node *Node
 }
 
 func (wrapper *RPC_wrapper) Find_successor(id *big.Int, ip *string) error {
-	return wrapper.node.Find_successor(id, ip)
+	return wrapper.Core_node.Find_successor(id, ip)
 }
 
 func (wrapper *RPC_wrapper) Find_predecessor(id *big.Int, ip *string) error {
-	return wrapper.node.Find_predecessor(id, ip)
+	return wrapper.Core_node.Find_predecessor(id, ip)
 }
 
 func (wrapper *RPC_wrapper) Get_successor(_ Null, addr *Addr) error {
-	return wrapper.node.Get_successor(addr)
+	return wrapper.Core_node.Get_successor(addr)
 }
 
 func (wrapper *RPC_wrapper) Get_predecessor(_ Null, addr *Addr) error {
-	return wrapper.node.Get_predecessor(addr)
+	return wrapper.Core_node.Get_predecessor(addr)
 }
 
-func (wrapper *RPC_wrapper) Notifty(addr Addr, _ Null) error {
-	return wrapper.node.Notifty(addr)
+func (wrapper *RPC_wrapper) Notifty(addr Addr, _ *Null) error {
+	return wrapper.Core_node.Notifty(addr)
 }
