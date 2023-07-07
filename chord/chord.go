@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/rpc"
 	"sync"
+	"time"
 
 	"github.com/sirupsen/logrus"
 )
@@ -36,19 +37,22 @@ func get_hash(Addr_IP string) *big.Int {
 
 func (node *Node) Init(ip string) bool {
 	node.Online = false
+	node.Predecessor = Addr{"", nil}
+	node.Server = nil
+	node.Listener = nil
 	node.This.IP = ip
 	node.This.ID = get_hash(ip)
 	return true
 }
 
 func (node *Node) Create() bool {
-	defer func() { node.Online = true }()
 	node.Finger_lock.Lock()
 	for i := range node.Finger {
 		node.Finger[i] = node.This
 	}
 	logrus.Infof("Create a new DHT net.")
 	logrus.Infof("New node (IP = %s, ID = %v) joins in.", node.This.IP, node.This.ID)
+	node.miantain()
 	defer node.Finger_lock.Unlock()
 	return true
 }
@@ -130,7 +134,6 @@ func belong(left_open, right_open bool, beg, end, tar *big.Int) bool {
 }
 
 func (node *Node) Join(ip string) bool {
-	defer func() { node.Online = true }()
 	defer node.Finger_lock.Unlock()
 	defer node.Pre_lock.Unlock()
 	logrus.Infof("New node (IP = %s, ID = %v) joins in.", node.This.IP, node.This.ID)
@@ -142,6 +145,7 @@ func (node *Node) Join(ip string) bool {
 		logrus.Errorf("Join error (IP = %s): %v.", node.This.IP, err)
 		return false
 	}
+	node.miantain()
 	return true
 }
 
@@ -172,4 +176,21 @@ func (node *Node) Notifty(addr Addr) error {
 		node.Predecessor = addr
 	}
 	return nil
+}
+
+func (node *Node) Run() error {
+	defer func() { node.Online = true }()
+	err := node.Serve()
+	if err != nil {
+		logrus.Errorf("Run error (IP = %s): %v.", node.This.IP, err)
+		return err
+	}
+	return nil
+}
+
+func (node *Node) miantain() {
+	for {
+		node.stabilize()
+		time.Sleep(200 * time.Millisecond)
+	}
 }

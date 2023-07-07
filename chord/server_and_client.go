@@ -25,21 +25,19 @@ func Remote_call(ip string, service_method string, args interface{}, reply inter
 	return nil
 }
 
-func (node *Node) Start_serve() error {
+func (node *Node) Serve() error {
 	var err error = nil
 	node.Server = rpc.NewServer()
 	err = node.Server.RegisterName("DHT", RPC_wrapper{node})
 	if err != nil {
 		logrus.Errorf("Registing error (server IP = %s): %v.", node.This.IP, err)
+		return err
 	}
 	node.Listener, err = net.Listen("tcp", node.This.IP)
 	if err != nil {
 		logrus.Errorf("Listening error (server IP = %s): %v.", node.This.IP, err)
+		return err
 	}
-	return err
-}
-
-func (node *Node) Serve() {
 	for {
 		conn, err := node.Listener.Accept()
 		if err != nil {
@@ -48,4 +46,5 @@ func (node *Node) Serve() {
 		}
 		go rpc.ServeConn(conn)
 	}
+	return nil
 }
