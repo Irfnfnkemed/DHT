@@ -13,19 +13,20 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-type Addr struct {
-	IP string
-	ID *big.Int
-}
+// type Addr struct {
+// 	IP string
+// 	ID *big.Int
+// }
 
 type Null struct{}
 
 type Node struct {
 	Online      bool
-	This        Addr
-	Predecessor Addr
+	IP          string
+	ID          *big.Int
+	Predecessor string
 	Pre_lock    sync.RWMutex
-	Finger      [161]Addr
+	Finger      [161]string
 	Finger_lock sync.RWMutex
 	Server      *rpc.Server
 	Listener    net.Listener
@@ -45,14 +46,14 @@ func init() {
 
 func (node *Node) Init(ip string) bool {
 	node.Online = false
-	node.Predecessor = Addr{"", nil}
+	node.Predecessor = ""
 	node.Server = nil
 	node.Listener = nil
-	node.This.IP = ip
-	node.This.ID = get_hash(ip)
+	node.IP = ip
+	node.ID = get_hash(ip)
 	node.fix_index = 2
 	for i := range node.Finger {
-		node.Finger[i] = node.This
+		node.Finger[i] = node.IP
 	}
 	return true
 }
@@ -60,56 +61,54 @@ func (node *Node) Init(ip string) bool {
 func (node *Node) Create() bool {
 	rand.Seed(time.Now().UnixNano())
 	logrus.Infof("Create a new DHT net.")
-	logrus.Infof("New node (IP = %s, ID = %v) joins in.", node.This.IP, node.This.ID)
+	logrus.Infof("New node (IP = %s, ID = %v) joins in.", node.IP, node.ID)
 	node.Pre_lock.Lock()
-	node.Predecessor = node.This
+	node.Predecessor = node.IP
 	node.Pre_lock.Unlock()
 	node.miantain()
 	return true
 }
 
 func (node *Node) Find_successor(id *big.Int, ip *string) error {
-	pre_ip := ""
-	err := node.Find_predecessor(id, &pre_ip)
+	pre := ""
+	err := node.Find_predecessor(id, &pre)
 	if err != nil {
-		logrus.Errorf("Find_successor error (IP = %s): %v.", node.This.IP, err)
+		logrus.Errorf("Find_successor error (IP = %s): %v.", node.IP, err)
 		return err
 	}
-	addr := Addr{"", nil}
-	err = Remote_call(pre_ip, "DHT.Get_successor", Null{}, &addr)
+	err = Remote_call(pre, "DHT.Get_successor", Null{}, ip)
 	if err != nil {
-		logrus.Errorf("Find_successor error (IP = %s): %v.", node.This.IP, err)
+		logrus.Errorf("Find_successor error (IP = %s): %v.", node.IP, err)
 		return err
 	}
-	*ip = addr.IP
 	return nil
 }
 
 func (node *Node) Find_predecessor(id *big.Int, ip *string) error {
-	*ip = node.This.IP
+	*ip = node.IP
 	node.Finger_lock.RLock()
-	successor := node.Finger[1].ID
+	successor_id := get_hash(node.Finger[1])
 	node.Finger_lock.RUnlock()
-	if !belong(false, true, node.This.ID, successor, id) {
+	if !belong(false, true, node.ID, successor_id, id) {
 		err := Remote_call(node.closest_preceding_finger(id), "DHT.Find_predecessor", id, ip)
 		if err != nil {
-			logrus.Errorf("Find_predecessor error (IP = %s): %v.", node.This.IP, err)
+			logrus.Errorf("Find_predecessor error (IP = %s): %v.", node.IP, err)
 			return err
 		}
 	}
 	return nil
 }
 
-func (node *Node) Get_successor(addr *Addr) error {
+func (node *Node) Get_successor(ip *string) error {
 	node.Finger_lock.RLock()
-	*addr = node.Finger[1]
+	*ip = node.Finger[1]
 	node.Finger_lock.RUnlock()
 	return nil
 }
 
-func (node *Node) Get_predecessor(addr *Addr) error {
+func (node *Node) Get_predecessor(ip *string) error {
 	node.Pre_lock.RLock()
-	*addr = node.Predecessor
+	*ip = node.Predecessor
 	node.Pre_lock.RUnlock()
 	return nil
 }
@@ -118,11 +117,11 @@ func (node *Node) closest_preceding_finger(id *big.Int) string {
 	node.Finger_lock.RLock()
 	defer node.Finger_lock.RUnlock()
 	for i := 160; i > 0; i-- {
-		if belong(false, false, node.This.ID, id, node.Finger[i].ID) {
-			return node.Finger[i].IP
+		if belong(false, false, node.ID, id, get_hash(node.Finger[i])) {
+			return node.Finger[i]
 		}
 	}
-	return node.This.IP
+	return node.IP
 }
 
 func belong(left_open, right_open bool, beg, end, tar *big.Int) bool {
@@ -158,62 +157,62 @@ func belong(left_open, right_open bool, beg, end, tar *big.Int) bool {
 }
 
 func (node *Node) Join(ip string) bool {
-	logrus.Infof("New node (IP = %s, ID = %v) joins in.", node.This.IP, node.This.ID)
+	logrus.Infof("New node (IP = %s, ID = %v) joins in.", node.IP, node.ID)
 	node.Pre_lock.Lock()
-	node.Predecessor = Addr{"", nil}
+	node.Predecessor = ""
 	node.Pre_lock.Unlock()
 	successor := ""
-	err := Remote_call(ip, "DHT.Find_successor", node.This.ID, &successor)
+	err := Remote_call(ip, "DHT.Find_successor", node.ID, &successor)
 	if err != nil {
-		logrus.Errorf("Join error (IP = %s): %v.", node.This.IP, err)
+		logrus.Errorf("Join error (IP = %s): %v.", node.IP, err)
 		return false
 	}
 	node.Finger_lock.Lock()
-	node.Finger[1] = Addr{successor, get_hash(successor)}
+	node.Finger[1] = successor
 	node.Finger_lock.Unlock()
 	node.miantain()
 	return true
 }
 
 func (node *Node) stabilize() error {
-	addr := Addr{"", nil}
 	node.Finger_lock.RLock()
-	successor := node.Finger[1].IP
+	successor := node.Finger[1]
 	node.Finger_lock.RUnlock()
-	err := Remote_call(successor, "DHT.Get_predecessor", Null{}, &addr)
+	ip := ""
+	err := Remote_call(successor, "DHT.Get_predecessor", Null{}, &ip)
 	if err != nil {
-		logrus.Errorf("Stabilize error (IP = %s): %v.", node.This.IP, err)
+		logrus.Errorf("Stabilize error (IP = %s): %v.", node.IP, err)
 		return err
 	}
 	node.Finger_lock.Lock()
-	if (successor == node.This.IP) ||
-		(addr.ID != nil && belong(false, false, node.This.ID, node.Finger[1].ID, addr.ID)) {
-		node.Finger[1] = addr
+	if (successor == node.IP) ||
+		(ip != "" && belong(false, false, node.ID, get_hash(node.Finger[1]), get_hash(ip))) {
+		node.Finger[1] = ip
 	}
-	successor = node.Finger[1].IP
+	successor = node.Finger[1]
 	node.Finger_lock.Unlock()
-	err = Remote_call(successor, "DHT.Notifty", node.This, &Null{})
+	err = Remote_call(successor, "DHT.Notifty", node.IP, &Null{})
 	if err != nil {
-		logrus.Errorf("Stabilize error (IP = %s): %v.", node.This.IP, err)
+		logrus.Errorf("Stabilize error (IP = %s): %v.", node.IP, err)
 		return err
 	}
 	return nil
 }
 
-func (node *Node) Notifty(addr Addr) error {
+func (node *Node) Notifty(ip string) error {
 	node.Pre_lock.Lock()
-	if node.Predecessor.ID == nil || belong(false, false, node.Predecessor.ID, node.This.ID, addr.ID) {
-		node.Predecessor = addr
+	if node.Predecessor == "" || belong(false, false, get_hash(node.Predecessor), node.ID, get_hash(ip)) {
+		node.Predecessor = ip
 	}
 	node.Pre_lock.Unlock()
 	return nil
 }
 
 func (node *Node) Run() error {
-	defer func() { node.Online = true }()
+	node.Online = true
 	err := node.Serve()
 	if err != nil {
-		logrus.Errorf("Run error (IP = %s): %v.", node.This.IP, err)
+		logrus.Errorf("Run error (IP = %s): %v.", node.IP, err)
 		return err
 	}
 	return nil
@@ -221,29 +220,29 @@ func (node *Node) Run() error {
 
 func (node *Node) miantain() {
 	go func() {
-		for {
+		for node.Online {
 			node.stabilize()
-			time.Sleep(200 * time.Millisecond)
+			time.Sleep(200 * time.Microsecond)
 		}
 	}()
 	go func() {
-		for {
+		for node.Online {
 			node.fix_finger()
-			time.Sleep(200 * time.Millisecond)
+			time.Sleep(200 * time.Microsecond)
 		}
 	}()
 }
 
 func (node *Node) fix_finger() error {
 	ip := ""
-	err := node.Find_successor(cal(node.This.ID, node.fix_index-1), &ip)
+	err := node.Find_successor(cal(node.ID, node.fix_index-1), &ip)
 	if err != nil {
-		logrus.Errorf("Fix_finger error (IP = %s): %v.", node.This.IP, err)
+		logrus.Errorf("Fix_finger error (IP = %s): %v.", node.IP, err)
 		return err
 	}
 	node.Finger_lock.Lock()
-	if node.Finger[node.fix_index].IP != ip { //更新Finger
-		node.Finger[node.fix_index] = Addr{ip, get_hash(ip)}
+	if node.Finger[node.fix_index] != ip { //更新Finger
+		node.Finger[node.fix_index] = ip
 	}
 	node.Finger_lock.Unlock()
 	node.fix_index = (node.fix_index-1)%159 + 2
@@ -258,4 +257,29 @@ func cal(n *big.Int, i int) *big.Int {
 		tmp.Sub(tmp, max)
 	}
 	return tmp
+}
+
+func (node *Node) Change_predecessor(ip string) {
+	node.Pre_lock.Lock()
+	node.Predecessor = ip
+	node.Pre_lock.Unlock()
+}
+
+func (node *Node) Change_successor(ip string) {
+	node.Finger_lock.Lock()
+	node.Finger[1] = ip
+	node.Finger_lock.Unlock()
+}
+
+func (node *Node) Quit() {
+	node.Pre_lock.RLock()
+	predecessor := node.Predecessor
+	node.Pre_lock.RUnlock()
+	node.Finger_lock.RLock()
+	successor := node.Finger[1]
+	node.Finger_lock.RUnlock()
+	go Remote_call(predecessor, "DHT.Change_successor", successor, &Null{})
+	go Remote_call(successor, "DHT.Change_predecessor", predecessor, &Null{})
+	node.Online = false
+	logrus.Infof("Node (IP = %s, ID = %v) quits.", node.IP, node.ID)
 }

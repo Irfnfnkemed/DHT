@@ -16,14 +16,24 @@ func (wrapper *RPC_wrapper) Find_predecessor(id *big.Int, ip *string) error {
 	return wrapper.Core_node.Find_predecessor(id, ip)
 }
 
-func (wrapper *RPC_wrapper) Get_successor(_ Null, addr *Addr) error {
-	return wrapper.Core_node.Get_successor(addr)
+func (wrapper *RPC_wrapper) Get_successor(_ Null, ip *string) error {
+	return wrapper.Core_node.Get_successor(ip)
 }
 
-func (wrapper *RPC_wrapper) Get_predecessor(_ Null, addr *Addr) error {
-	return wrapper.Core_node.Get_predecessor(addr)
+func (wrapper *RPC_wrapper) Get_predecessor(_ Null, ip *string) error {
+	return wrapper.Core_node.Get_predecessor(ip)
 }
 
-func (wrapper *RPC_wrapper) Notifty(addr Addr, _ *Null) error {
-	return wrapper.Core_node.Notifty(addr)
+func (wrapper *RPC_wrapper) Notifty(ip string, _ *Null) error {
+	return wrapper.Core_node.Notifty(ip)
+}
+
+func (wrapper *RPC_wrapper) Change_predecessor(ip string, _ *Null) error {
+	wrapper.Core_node.Change_predecessor(ip)
+	return nil
+}
+
+func (wrapper *RPC_wrapper) Change_successor(ip string, _ *Null) error {
+	wrapper.Core_node.Change_successor(ip)
+	return nil
 }

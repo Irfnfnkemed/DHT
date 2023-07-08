@@ -34,22 +34,22 @@ func (node *Node) Serve() error {
 	node.Server = rpc.NewServer()
 	err = node.Server.RegisterName("DHT", &RPC_wrapper{node})
 	if err != nil {
-		logrus.Errorf("Registing error (server IP = %s): %v.", node.This.IP, err)
+		logrus.Errorf("Registing error (server IP = %s): %v.", node.IP, err)
 		return err
 	} else {
-		logrus.Infof("Regist done (server IP = %s, name = DHT).", node.This.IP)
+		logrus.Infof("Regist done (server IP = %s, name = DHT).", node.IP)
 	}
-	node.Listener, err = net.Listen("tcp", node.This.IP)
+	node.Listener, err = net.Listen("tcp", node.IP)
 	if err != nil {
-		logrus.Errorf("Listening error (server IP = %s): %v.", node.This.IP, err)
+		logrus.Errorf("Listening error (server IP = %s): %v.", node.IP, err)
 		return err
 	} else {
-		logrus.Infof("Listen done (server IP = %s, network = tcp).", node.This.IP)
+		logrus.Infof("Listen done (server IP = %s, network = tcp).", node.IP)
 	}
-	for {
+	for node.Online {
 		conn, err := node.Listener.Accept()
 		if err != nil {
-			logrus.Errorf("Accepting error (server IP = %s): %v.", node.This.IP, err)
+			logrus.Errorf("Accepting error (server IP = %s): %v.", node.IP, err)
 			continue
 		}
 		go node.Server.ServeConn(conn)
