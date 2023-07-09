@@ -4,8 +4,6 @@ import (
 	"crypto/sha1"
 	"math/big"
 	"math/rand"
-	"net"
-	"net/rpc"
 	"os"
 	"sync"
 	"time"
@@ -13,23 +11,17 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-// type Addr struct {
-// 	IP string
-// 	ID *big.Int
-// }
-
 type Null struct{}
 
 type Node struct {
 	Online      bool
+	Server      Node_rpc
 	IP          string
 	ID          *big.Int
 	Predecessor string
 	Pre_lock    sync.RWMutex
 	Finger      [161]string
 	Finger_lock sync.RWMutex
-	Server      *rpc.Server
-	Listener    net.Listener
 	fix_index   int
 }
 
@@ -47,8 +39,6 @@ func init() {
 func (node *Node) Init(ip string) bool {
 	node.Online = false
 	node.Predecessor = ""
-	node.Server = nil
-	node.Listener = nil
 	node.IP = ip
 	node.ID = get_hash(ip)
 	node.fix_index = 2
@@ -70,6 +60,10 @@ func (node *Node) Create() bool {
 }
 
 func (node *Node) Find_successor(id *big.Int, ip *string) error {
+	if id.Cmp(node.ID) == 0 { //当前节点即位目标后继，结束
+		*ip = node.IP
+		return nil
+	}
 	pre := ""
 	err := node.Find_predecessor(id, &pre)
 	if err != nil {
@@ -114,10 +108,16 @@ func (node *Node) Get_predecessor(ip *string) error {
 }
 
 func (node *Node) closest_preceding_finger(id *big.Int) string {
-	node.Finger_lock.RLock()
-	defer node.Finger_lock.RUnlock()
+	node.Finger_lock.Lock()
+	defer node.Finger_lock.Unlock()
 	for i := 160; i > 0; i-- {
-		if belong(false, false, node.ID, id, get_hash(node.Finger[i])) {
+		if !Ping(node.Finger[i]) { //已下线，将Finger设为仍然上线的位置
+			if i == 160 {
+				node.Finger[i] = node.IP
+			} else {
+				node.Finger[i] = node.Finger[i+1]
+			}
+		} else if belong(false, false, node.ID, id, get_hash(node.Finger[i])) {
 			return node.Finger[i]
 		}
 	}
