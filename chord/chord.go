@@ -13,9 +13,9 @@ import (
 
 type Null struct{}
 
-type data_pair struct {
-	key   string
-	value string
+type Data_pair struct {
+	Key   string
+	Value string
 }
 
 type Node struct {
@@ -382,12 +382,12 @@ func (node *Node) Put(key string, value string) bool {
 	pre := node.Predecessor
 	node.Pre_lock.RUnlock()
 	if belong(false, true, get_hash(pre), node.ID, id) {
-		node.Put_in(data_pair{key, value})
+		node.Put_in(Data_pair{key, value})
 	} else {
 		ip, _ := node.Find_successor(id)
-		err := Remote_call(ip, "DHT.Put_in", data_pair{key, value}, &Null{})
+		err := Remote_call(ip, "DHT.Put_in", Data_pair{key, value}, &Null{})
 		if err != nil {
-			logrus.Errorf("Putting in data error (IP = %s): %v.", node.IP, err)
+			logrus.Errorf("Node (IP = %s) putting in data error (key = %s, value = %s): %v.", node.IP, key, value, err)
 			return false
 		}
 	}
@@ -395,9 +395,35 @@ func (node *Node) Put(key string, value string) bool {
 	return true
 }
 
-func (node *Node) Put_in(data data_pair) error {
+func (node *Node) Put_in(data Data_pair) error {
 	node.data_lock.Lock()
-	node.data[data.key] = data.value
+	node.data[data.Key] = data.Value
 	node.data_lock.Unlock()
 	return nil
+}
+
+func (node *Node) Get(key string) (ok bool, value string) {
+	id := get_hash(key)
+	node.Pre_lock.RLock()
+	pre := node.Predecessor
+	node.Pre_lock.RUnlock()
+	if belong(false, true, get_hash(pre), node.ID, id) {
+		value, ok = node.Get_out(key)
+	} else {
+		ip, _ := node.Find_successor(id)
+		err := Remote_call(ip, "DHT.Get_out", key, &value)
+		if err != nil {
+			logrus.Errorf("Node (IP = %s) getting out data error (key = %s, value = %s): %v.", node.IP, key, value, err)
+			return false, ""
+		}
+	}
+	logrus.Infof("Node (IP = %s) gets out data : key = %s, value = %s.", node.IP, key, value)
+	return true, value
+}
+
+func (node *Node) Get_out(key string) (string, bool) {
+	node.data_lock.RLock()
+	defer node.data_lock.RUnlock()
+	value, ok := node.data[key]
+	return value, ok
 }
