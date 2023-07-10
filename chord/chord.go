@@ -2,7 +2,6 @@ package chord
 
 import (
 	"crypto/sha1"
-	"errors"
 	"math/big"
 	"math/rand"
 	"os"
@@ -71,60 +70,54 @@ func (node *Node) Create() bool {
 	return true
 }
 
-func (node *Node) Find_successor(id *big.Int, ip *string) error {
+func (node *Node) Find_successor(id *big.Int) (ip string, err error) {
 	if id.Cmp(node.ID) == 0 { //当前节点即位目标后继，结束
-		*ip = node.IP
-		return nil
+		ip = node.IP
+		return ip, nil
 	}
-	pre := ""
-	err := node.Find_predecessor(id, &pre)
+	pre, err := node.Find_predecessor(id)
 	if err != nil {
 		logrus.Errorf("Find_successor error (IP = %s): %v.", node.IP, err)
-		return err
+		return "", err
 	}
-	err = Remote_call(pre, "DHT.Get_successor", Null{}, ip)
+	err = Remote_call(pre, "DHT.Get_successor", Null{}, &ip)
 	if err != nil {
 		logrus.Errorf("Find_successor error (IP = %s): %v.", node.IP, err)
-		return err
+		return "", err
 	}
-	return nil
+	return ip, nil
 }
 
-func (node *Node) Find_predecessor(id *big.Int, ip *string) error {
-	*ip = node.IP
+func (node *Node) Find_predecessor(id *big.Int) (ip string, err error) {
+	ip = node.IP
 	node.Suc_lock.RLock()
 	successor_id := get_hash(node.Successor_list[0])
 	node.Suc_lock.RUnlock()
 	if !belong(false, true, node.ID, successor_id, id) {
-		err := Remote_call(node.closest_preceding_finger(id), "DHT.Find_predecessor", id, ip)
+		err = Remote_call(node.closest_preceding_finger(id), "DHT.Find_predecessor", id, &ip)
 		if err != nil {
 			logrus.Errorf("Find_predecessor error (IP = %s): %v.", node.IP, err)
-			return err
+			return "", err
 		}
 	}
-	return nil
+	return ip, nil
 }
 
-func (node *Node) Get_successor(ip *string) error {
-	node.Suc_lock.RLock()
-	defer node.Suc_lock.RUnlock()
-	for _, ip_tmp := range node.Successor_list {
-		if Ping(ip_tmp) {
-			*ip = ip_tmp
-			return nil
-		}
-	}
-	return errors.New("All successors in list are offline.")
+func (node *Node) Get_successor() (ip string, err error) {
+	node.update_successor_list()
+	node.Suc_lock.Lock()
+	defer node.Suc_lock.Unlock()
+	return node.Successor_list[0], nil
 }
 
-func (node *Node) Get_predecessor(ip *string) error {
+func (node *Node) Get_predecessor() (ip string, err error) {
 	node.Pre_lock.Lock()
 	if node.Predecessor == "" || !Ping(node.Predecessor) {
 		node.Predecessor = "" //若前驱已下线，置为空
 	}
-	*ip = node.Predecessor
+	ip = node.Predecessor
 	node.Pre_lock.Unlock()
-	return nil
+	return ip, nil
 }
 
 func (node *Node) closest_preceding_finger(id *big.Int) string {
@@ -195,18 +188,20 @@ func (node *Node) Join(ip string) bool {
 }
 
 func (node *Node) stabilize() error {
-	node.Suc_lock.RLock()
-	successor := node.Successor_list[0]
-	node.Suc_lock.RUnlock()
+	successor, err := node.Get_successor()
+	if err != nil {
+		logrus.Errorf("Stabilize error (IP = %s): %v.", node.IP, err)
+		return err
+	}
 	ip := ""
-	err := Remote_call(successor, "DHT.Get_predecessor", Null{}, &ip)
+	err = Remote_call(successor, "DHT.Get_predecessor", Null{}, &ip)
 	if err != nil {
 		logrus.Errorf("Stabilize error (IP = %s): %v.", node.IP, err)
 		return err
 	}
 	node.Suc_lock.Lock()
 	if (successor == node.IP) ||
-		(ip != "" && belong(false, false, node.ID, get_hash(node.Successor_list[0]), get_hash(ip))) {
+		(ip != "" && belong(false, false, node.ID, get_hash(successor), get_hash(ip))) {
 		node.Successor_list[0] = ip
 	}
 	successor = node.Successor_list[0]
@@ -251,17 +246,10 @@ func (node *Node) maintain() {
 			time.Sleep(200 * time.Microsecond)
 		}
 	}()
-	go func() {
-		for node.Online {
-			node.update_successor_list()
-			time.Sleep(200 * time.Microsecond)
-		}
-	}()
 }
 
 func (node *Node) fix_finger() error {
-	ip := ""
-	err := node.Find_successor(cal(node.ID, node.fix_index-1), &ip)
+	ip, err := node.Find_successor(cal(node.ID, node.fix_index-1))
 	if err != nil {
 		logrus.Errorf("Fixing finger error (IP = %s): %v.", node.IP, err)
 		return err
@@ -306,8 +294,7 @@ func (node *Node) Quit() {
 	node.Suc_lock.RLock()
 	successor_list := node.Successor_list
 	node.Suc_lock.RUnlock()
-	online_successor := ""
-	err := node.Get_successor(&online_successor)
+	online_successor, err := node.Get_successor()
 	if err != nil {
 		logrus.Errorf("Quiting error (IP = %s): %v.", node.IP, err)
 	}
@@ -355,9 +342,9 @@ func (node *Node) update_successor_list() error {
 			return nil
 		}
 	}
+	logrus.Infof("All successors are offline (IP = %s).", node.IP)
 	//后继列表中节点均失效，尝试通过路由表寻找以防止环断裂
-	ip := ""
-	err := node.Find_successor(cal(node.ID, 0), &ip)
+	ip, err := node.Find_successor(cal(node.ID, 0))
 	if err != nil {
 		logrus.Errorf("Finding successor list error (IP = %s): %v.", node.IP, err)
 	}

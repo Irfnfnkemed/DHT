@@ -9,20 +9,24 @@ type RPC_wrapper struct {
 	node *Node
 }
 
-func (wrapper *RPC_wrapper) Find_successor(id *big.Int, ip *string) error {
-	return wrapper.node.Find_successor(id, ip)
+func (wrapper *RPC_wrapper) Find_successor(id *big.Int, ip *string) (err error) {
+	*ip, err = wrapper.node.Find_successor(id)
+	return err
 }
 
-func (wrapper *RPC_wrapper) Find_predecessor(id *big.Int, ip *string) error {
-	return wrapper.node.Find_predecessor(id, ip)
+func (wrapper *RPC_wrapper) Find_predecessor(id *big.Int, ip *string) (err error) {
+	*ip, err = wrapper.node.Find_predecessor(id)
+	return err
 }
 
-func (wrapper *RPC_wrapper) Get_successor(_ Null, ip *string) error {
-	return wrapper.node.Get_successor(ip)
+func (wrapper *RPC_wrapper) Get_successor(_ Null, ip *string) (err error) {
+	*ip, err = wrapper.node.Get_successor()
+	return err
 }
 
-func (wrapper *RPC_wrapper) Get_predecessor(_ Null, ip *string) error {
-	return wrapper.node.Get_predecessor(ip)
+func (wrapper *RPC_wrapper) Get_predecessor(_ Null, ip *string) (err error) {
+	*ip, err = wrapper.node.Get_predecessor()
+	return err
 }
 
 func (wrapper *RPC_wrapper) Notifty(ip string, _ *Null) error {
