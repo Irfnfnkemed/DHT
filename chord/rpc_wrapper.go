@@ -55,7 +55,7 @@ func (wrapper *RPC_wrapper) Get_successor_list(_ Null, successor_list *[3]string
 	return nil
 }
 
-func (wrapper *RPC_wrapper) Put_in(data Data_pair, _ *Null) error {
+func (wrapper *RPC_wrapper) Put_in(data []Data_pair, _ *Null) error {
 	return wrapper.node.Put_in(data)
 }
 
@@ -67,4 +67,8 @@ func (wrapper *RPC_wrapper) Get_out(key string, value *string) error {
 	} else {
 		return errors.New("Get out error.")
 	}
+}
+
+func (wrapper *RPC_wrapper) Transfer_data(to_ip string, _ *Null) error {
+	return wrapper.node.Transfer_data(to_ip)
 }
