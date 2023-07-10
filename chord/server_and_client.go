@@ -58,15 +58,11 @@ func (node *Node) Serve() error {
 	if err != nil {
 		return err
 	}
-	for node.Online {
-		conn, err := node.RPC.listener.Accept()
-		if err != nil {
-			logrus.Errorf("Accepting error (server IP = %s): %v.", node.IP, err)
-			continue
-		}
-		go node.RPC.server.ServeConn(conn)
-		time.Sleep(200 * time.Microsecond)
+	select {
+	case <-node.quit:
+		node.RPC.close_conn() //结束服务
 	}
+	logrus.Infof("Node stops serving (server IP = %s).", node.IP)
 	node.RPC.close_conn()
 	return nil
 }
@@ -83,16 +79,19 @@ func Ping(ip string) bool {
 
 func (node_rpc *Node_rpc) create_client(ip string) error {
 	node_rpc.clients = make(chan *rpc.Client, 20)
-	node_rpc.conns = make(chan net.Conn, 20)
+	node_rpc.conns = make(chan net.Conn, 40)
 	for i := 0; i < 20; i++ {
 		conn, err := net.DialTimeout("tcp", ip, time.Second)
 		if err != nil {
 			logrus.Errorf("Dialing error (server IP = %s): %v.", ip, err)
 			continue
 		}
-		node_rpc.clients <- rpc.NewClient(conn)
+		client := rpc.NewClient(conn)
+		if node_rpc.connect(client) != nil {
+			logrus.Errorf("Connecting error (server IP = %s): %v.", ip, err)
+			continue
+		}
 		node_rpc.conns <- conn
-
 	}
 	close(node_rpc.conns)
 	client_pool_lock.Lock()
@@ -123,4 +122,17 @@ func (node_rpc *Node_rpc) close_conn() {
 	for range node_rpc.conns {
 		(<-node_rpc.conns).Close()
 	}
+}
+
+func (node_rpc *Node_rpc) connect(client *rpc.Client) error {
+	go client.Call("DHT.Ping", Null{}, &Null{}) //尝试建立客户端与服务器的连接
+	conn, err := node_rpc.listener.Accept()
+	if err != nil {
+		logrus.Error("Building connection error.")
+		return err
+	}
+	go node_rpc.server.ServeConn(conn) //开始服务
+	node_rpc.clients <- client
+	node_rpc.conns <- conn
+	return nil
 }

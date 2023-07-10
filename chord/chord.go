@@ -26,6 +26,7 @@ type Node struct {
 	Finger         [161]string
 	Finger_lock    sync.RWMutex
 	fix_index      int
+	quit           chan bool
 }
 
 func get_hash(Addr_IP string) *big.Int {
@@ -41,6 +42,7 @@ func init() {
 
 func (node *Node) Init(ip string) bool {
 	node.Online = false
+	node.quit = make(chan bool, 1)
 	node.Predecessor = ""
 	node.IP = ip
 	node.ID = get_hash(ip)
@@ -65,7 +67,7 @@ func (node *Node) Create() bool {
 	node.Pre_lock.Lock()
 	node.Predecessor = node.IP
 	node.Pre_lock.Unlock()
-	node.miantain()
+	node.maintain()
 	return true
 }
 
@@ -188,7 +190,7 @@ func (node *Node) Join(ip string) bool {
 	node.Suc_lock.Lock()
 	node.Successor_list[0] = successor
 	node.Suc_lock.Unlock()
-	node.miantain()
+	node.maintain()
 	return true
 }
 
@@ -236,7 +238,7 @@ func (node *Node) Run() error {
 	return nil
 }
 
-func (node *Node) miantain() {
+func (node *Node) maintain() {
 	go func() {
 		for node.Online {
 			node.stabilize()
@@ -316,6 +318,7 @@ func (node *Node) Quit() {
 		Remote_call(online_successor, "DHT.Change_predecessor", predecessor, &Null{})
 	}
 	node.Online = false
+	close(node.quit)
 	logrus.Infof("Node (IP = %s, ID = %v) quits.", node.IP, node.ID)
 }
 
@@ -352,10 +355,26 @@ func (node *Node) update_successor_list() error {
 			return nil
 		}
 	}
+	//后继列表中节点均失效，尝试通过路由表寻找以防止环断裂
+	ip := ""
+	err := node.Find_successor(cal(node.ID, 0), &ip)
+	if err != nil {
+		logrus.Errorf("Finding successor list error (IP = %s): %v.", node.IP, err)
+	}
 	node.Suc_lock.Lock()
 	for i := range node.Successor_list {
-		node.Successor_list[i] = node.IP //后继列表中节点均失效，直接将后继列表置为自己
+		if i == 0 && ip != "" {
+			node.Successor_list[0] = ip
+		} else {
+			node.Successor_list[i] = node.IP
+		}
 	}
 	node.Suc_lock.Unlock()
 	return nil
+}
+
+func (node *Node) ForceQuit() {
+	node.Online = false
+	close(node.quit)
+	logrus.Infof("Node (IP = %s, ID = %v) force quits.", node.IP, node.ID)
 }
