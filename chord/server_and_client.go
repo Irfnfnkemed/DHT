@@ -1,7 +1,6 @@
 package chord
 
 import (
-	"errors"
 	"net"
 	"net/rpc"
 	"sync"
@@ -10,12 +9,14 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-var client_pool sync.Map
+var client_pool map[string]chan *rpc.Client //ip到用户池的映射
+var client_pool_lock sync.RWMutex
 
 type Node_rpc struct {
 	server   *rpc.Server
 	listener net.Listener
 	clients  chan *rpc.Client //容量为20
+	conns    chan net.Conn    //容量为20
 }
 
 func Remote_call(ip string, service_method string, args interface{}, reply interface{}) error {
@@ -38,34 +39,35 @@ func Remote_call(ip string, service_method string, args interface{}, reply inter
 
 func (node *Node) Serve() error {
 	var err error = nil
-	node.Server.server = rpc.NewServer()
-	err = node.Server.server.RegisterName("DHT", &RPC_wrapper{node})
+	node.RPC.server = rpc.NewServer()
+	err = node.RPC.server.RegisterName("DHT", &RPC_wrapper{node})
 	if err != nil {
 		logrus.Errorf("Registing error (server IP = %s): %v.", node.IP, err)
 		return err
 	} else {
 		logrus.Infof("Regist done (server IP = %s, name = DHT).", node.IP)
 	}
-	node.Server.listener, err = net.Listen("tcp", node.IP)
+	node.RPC.listener, err = net.Listen("tcp", node.IP)
 	if err != nil {
 		logrus.Errorf("Listening error (server IP = %s): %v.", node.IP, err)
 		return err
 	} else {
 		logrus.Infof("Listen done (server IP = %s, network = tcp).", node.IP)
 	}
-	err = node.Server.create_client(node.IP)
+	err = node.RPC.create_client(node.IP)
 	if err != nil {
 		return err
 	}
 	for node.Online {
-		conn, err := node.Server.listener.Accept()
+		conn, err := node.RPC.listener.Accept()
 		if err != nil {
 			logrus.Errorf("Accepting error (server IP = %s): %v.", node.IP, err)
 			continue
 		}
-		go node.Server.server.ServeConn(conn)
+		go node.RPC.server.ServeConn(conn)
 		time.Sleep(200 * time.Microsecond)
 	}
+	node.RPC.close_conn()
 	return nil
 }
 
@@ -81,37 +83,44 @@ func Ping(ip string) bool {
 
 func (node_rpc *Node_rpc) create_client(ip string) error {
 	node_rpc.clients = make(chan *rpc.Client, 20)
+	node_rpc.conns = make(chan net.Conn, 20)
 	for i := 0; i < 20; i++ {
 		conn, err := net.DialTimeout("tcp", ip, time.Second)
 		if err != nil {
 			logrus.Errorf("Dialing error (server IP = %s): %v.", ip, err)
-			i--
 			continue
 		}
 		node_rpc.clients <- rpc.NewClient(conn)
+		node_rpc.conns <- conn
+
 	}
-	client_pool.Store(ip, node_rpc.clients) //添加
+	close(node_rpc.conns)
+	client_pool_lock.Lock()
+	if client_pool == nil {
+		client_pool = make(map[string]chan *rpc.Client)
+	}
+	client_pool[ip] = node_rpc.clients //添加
+	client_pool_lock.Unlock()
 	logrus.Infof("Create 20 clients (server IP = %s).", ip)
 	return nil
 }
 
 func get_client(ip string) (*rpc.Client, error) {
-	clients_tmp, ok := client_pool.Load(ip)
-	if !ok {
-		return nil, errors.New("Get client error.")
-	} else {
-		clients, _ := clients_tmp.(chan *rpc.Client)
-		return <-clients, nil
-	}
+	client_pool_lock.RLock()
+	clients := client_pool[ip]
+	client_pool_lock.RUnlock()
+	return <-clients, nil
 }
 
 func return_client(ip string, client *rpc.Client) error {
-	clients_tmp, ok := client_pool.Load(ip)
-	if !ok {
-		return errors.New("Return client error.")
-	} else {
-		clients, _ := clients_tmp.(chan *rpc.Client)
-		clients <- client
-		return nil
+	client_pool_lock.RLock()
+	client_pool[ip] <- client
+	client_pool_lock.RUnlock()
+	return nil
+}
+
+func (node_rpc *Node_rpc) close_conn() {
+	for range node_rpc.conns {
+		(<-node_rpc.conns).Close()
 	}
 }

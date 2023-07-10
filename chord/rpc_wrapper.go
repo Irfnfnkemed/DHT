@@ -34,8 +34,8 @@ func (wrapper *RPC_wrapper) Change_predecessor(ip string, _ *Null) error {
 	return nil
 }
 
-func (wrapper *RPC_wrapper) Change_successor(ip string, _ *Null) error {
-	wrapper.node.Change_successor(ip)
+func (wrapper *RPC_wrapper) Change_successor_list(list [3]string, _ *Null) error {
+	wrapper.node.Change_successor_list(list)
 	return nil
 }
 
@@ -44,4 +44,9 @@ func (wrapper *RPC_wrapper) Ping(_ Null, _ *Null) error {
 		return nil
 	}
 	return errors.New("Offline node.")
+}
+
+func (wrapper *RPC_wrapper) Get_successor_list(_ Null, successor_list *[3]string) error {
+	*successor_list = wrapper.node.Get_successor_list()
+	return nil
 }
