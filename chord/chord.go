@@ -13,6 +13,11 @@ import (
 
 type Null struct{}
 
+type data_pair struct {
+	key   string
+	value string
+}
+
 type Node struct {
 	Online         bool
 	RPC            Node_rpc
@@ -24,6 +29,8 @@ type Node struct {
 	Suc_lock       sync.RWMutex
 	Finger         [161]string
 	Finger_lock    sync.RWMutex
+	data           map[string]string
+	data_lock      sync.RWMutex
 	fix_index      int
 	quit           chan bool
 }
@@ -56,6 +63,9 @@ func (node *Node) Init(ip string) bool {
 		node.Successor_list[i] = node.IP
 	}
 	node.Suc_lock.Unlock()
+	node.data_lock.Lock()
+	node.data = make(map[string]string)
+	node.data_lock.Unlock()
 	return true
 }
 
@@ -364,4 +374,30 @@ func (node *Node) ForceQuit() {
 	node.Online = false
 	close(node.quit)
 	logrus.Infof("Node (IP = %s, ID = %v) force quits.", node.IP, node.ID)
+}
+
+func (node *Node) Put(key string, value string) bool {
+	id := get_hash(key)
+	node.Pre_lock.RLock()
+	pre := node.Predecessor
+	node.Pre_lock.RUnlock()
+	if belong(false, true, get_hash(pre), node.ID, id) {
+		node.Put_in(data_pair{key, value})
+	} else {
+		ip, _ := node.Find_successor(id)
+		err := Remote_call(ip, "DHT.Put_in", data_pair{key, value}, &Null{})
+		if err != nil {
+			logrus.Errorf("Putting in data error (IP = %s): %v.", node.IP, err)
+			return false
+		}
+	}
+	logrus.Infof("Node (IP = %s) puts in data : key = %s, value = %s.", node.IP, key, value)
+	return true
+}
+
+func (node *Node) Put_in(data data_pair) error {
+	node.data_lock.Lock()
+	node.data[data.key] = data.value
+	node.data_lock.Unlock()
+	return nil
 }

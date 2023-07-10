@@ -54,3 +54,7 @@ func (wrapper *RPC_wrapper) Get_successor_list(_ Null, successor_list *[3]string
 	*successor_list = wrapper.node.Get_successor_list()
 	return nil
 }
+
+func (wrapper *RPC_wrapper) Put_in(data data_pair, _ *Null) error {
+	return wrapper.node.Put_in(data)
+}
