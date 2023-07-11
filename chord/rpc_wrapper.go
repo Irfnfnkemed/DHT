@@ -72,3 +72,12 @@ func (wrapper *RPC_wrapper) Get_out(key string, value *string) error {
 func (wrapper *RPC_wrapper) Transfer_data(to_ip string, _ *Null) error {
 	return wrapper.node.Transfer_data(to_ip)
 }
+
+func (wrapper *RPC_wrapper) Delete_off(keys []string, _ *Null) error {
+	ok := wrapper.node.Delete_off(keys)
+	if ok {
+		return nil
+	} else {
+		return errors.New("Delete off error.")
+	}
+}

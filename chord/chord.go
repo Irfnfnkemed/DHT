@@ -461,3 +461,41 @@ func (node *Node) Transfer_data(to_ip string) error { //将数据转移到前节
 	}
 	return nil
 }
+
+func (node *Node) Delete(key string) bool {
+	id := get_hash(key)
+	node.Pre_lock.RLock()
+	pre := node.Predecessor
+	node.Pre_lock.RUnlock()
+	if belong(false, true, get_hash(pre), node.ID, id) {
+		ok := node.Delete_off([]string{key})
+		if !ok {
+			logrus.Errorf("Node (IP = %s) deleting off data error (key = %s).", node.IP, key)
+			return false
+		}
+	} else {
+		ip, _ := node.Find_successor(id)
+		err := Remote_call(ip, "DHT.Delete_off", []string{key}, &Null{})
+		if err != nil {
+			logrus.Errorf("Node (IP = %s) deleting off data error (key = %s): %v.", node.IP, key, err)
+			return false
+		}
+	}
+	logrus.Infof("Node (IP = %s) delete off data : key = %s.", node.IP, key)
+	return true
+}
+
+func (node *Node) Delete_off(keys []string) bool {
+	out := true
+	node.data_lock.Lock()
+	for _, key := range keys {
+		_, ok := node.data[key]
+		if !ok {
+			out = false
+		} else {
+			delete(node.data, key)
+		}
+	}
+	node.data_lock.Unlock()
+	return out
+}
