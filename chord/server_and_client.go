@@ -65,6 +65,7 @@ func (node *Node) Serve() error {
 	}
 	logrus.Infof("Node stops serving (server IP = %s).", node.IP)
 	node.RPC.close_conn()
+	node.RPC.listener.Close()
 	return nil
 }
 
