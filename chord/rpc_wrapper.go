@@ -59,6 +59,14 @@ func (wrapper *RPC_wrapper) Put_in(data []Data_pair, _ *Null) error {
 	return wrapper.node.Put_in(data)
 }
 
+func (wrapper *RPC_wrapper) Put_in_all(data []Data_pair, _ *Null) error {
+	return wrapper.node.Put_in_all(data)
+}
+
+func (wrapper *RPC_wrapper) Put_in_backup(data []Data_pair, _ *Null) error {
+	return wrapper.node.Put_in_backup(data)
+}
+
 func (wrapper *RPC_wrapper) Get_out(key string, value *string) error {
 	ok := false
 	*value, ok = wrapper.node.Get_out(key)
@@ -69,8 +77,8 @@ func (wrapper *RPC_wrapper) Get_out(key string, value *string) error {
 	}
 }
 
-func (wrapper *RPC_wrapper) Transfer_data(to_ip string, _ *Null) error {
-	return wrapper.node.Transfer_data(to_ip)
+func (wrapper *RPC_wrapper) Transfer_data(ips IP_pair, _ *Null) error {
+	return wrapper.node.Transfer_data(ips)
 }
 
 func (wrapper *RPC_wrapper) Delete_off(keys []string, _ *Null) error {
@@ -79,5 +87,14 @@ func (wrapper *RPC_wrapper) Delete_off(keys []string, _ *Null) error {
 		return nil
 	} else {
 		return errors.New("Delete off error.")
+	}
+}
+
+func (wrapper *RPC_wrapper) Delete_off_backup(keys []string, _ *Null) error {
+	ok := wrapper.node.Delete_off_backup(keys)
+	if ok {
+		return nil
+	} else {
+		return errors.New("Delete off backup error.")
 	}
 }

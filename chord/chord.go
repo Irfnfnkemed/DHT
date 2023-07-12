@@ -2,6 +2,7 @@ package chord
 
 import (
 	"crypto/sha1"
+	"fmt"
 	"math/big"
 	"math/rand"
 	"os"
@@ -23,21 +24,34 @@ type Data_pair struct {
 	Value_pair Value_pair
 }
 
+type IP_pair struct {
+	IP_pre     string
+	IP_pre_pre string
+}
+
 type Node struct {
-	Online         bool
-	RPC            Node_rpc
-	IP             string
-	ID             *big.Int
-	Predecessor    string
-	Pre_lock       sync.RWMutex
-	Successor_list [3]string
-	Suc_lock       sync.RWMutex
-	Finger         [161]string
-	Finger_lock    sync.RWMutex
-	data           map[string]Value_pair
-	data_lock      sync.RWMutex
-	fix_index      int
-	quit           chan bool
+	Online           bool
+	RPC              Node_rpc
+	IP               string
+	ID               *big.Int
+	Predecessor      string
+	Pre_lock         sync.RWMutex
+	Successor_list   [3]string
+	Suc_lock         sync.RWMutex
+	Finger           [161]string
+	Finger_lock      sync.RWMutex
+	data             map[string]Value_pair
+	data_lock        sync.RWMutex
+	data_backup      map[string]Value_pair
+	data_backup_lock sync.RWMutex
+	fix_index        int
+	start            chan bool
+	quit             chan bool
+}
+
+func (node *Node) B() {
+	fmt.Println("data:", node.data)
+	fmt.Println("backup:", node.data_backup)
 }
 
 func get_hash(Addr_IP string) *big.Int {
@@ -53,6 +67,7 @@ func init() {
 
 func (node *Node) Init(ip string) bool {
 	node.Online = false
+	node.start = make(chan bool, 1)
 	node.quit = make(chan bool, 1)
 	node.Predecessor = ""
 	node.IP = ip
@@ -71,10 +86,13 @@ func (node *Node) Init(ip string) bool {
 	node.data_lock.Lock()
 	node.data = make(map[string]Value_pair)
 	node.data_lock.Unlock()
+	node.data_backup_lock.Lock()
+	node.data_backup = make(map[string]Value_pair)
+	node.data_backup_lock.Unlock()
 	return true
 }
 
-func (node *Node) Create() bool {
+func (node *Node) Create() {
 	rand.Seed(time.Now().UnixNano())
 	logrus.Infof("Create a new DHT net.")
 	logrus.Infof("New node (IP = %s, ID = %v) joins in.", node.IP, node.ID)
@@ -82,7 +100,6 @@ func (node *Node) Create() bool {
 	node.Predecessor = node.IP
 	node.Pre_lock.Unlock()
 	node.maintain()
-	return true
 }
 
 func (node *Node) Find_successor(id *big.Int) (ip string, err error) {
@@ -190,10 +207,13 @@ func (node *Node) Join(ip string) bool {
 	node.Predecessor = ""
 	node.Pre_lock.Unlock()
 	successor := ""
-	err := Remote_call(ip, "DHT.Find_successor", node.ID, &successor)
-	if err != nil {
-		logrus.Errorf("Join error (IP = %s): %v.", node.IP, err)
-		return false
+	select { // 阻塞直至run()完成
+	case <-node.start:
+		err := Remote_call(ip, "DHT.Find_successor", node.ID, &successor)
+		if err != nil {
+			logrus.Errorf("Join error (IP = %s): %v.", node.IP, err)
+			return false
+		}
 	}
 	node.Suc_lock.Lock()
 	node.Successor_list[0] = successor
@@ -221,9 +241,7 @@ func (node *Node) stabilize() error {
 		node.Successor_list[1] = node.Successor_list[0]
 		node.Successor_list[0] = ip
 		node.Suc_lock.Unlock()
-	}
-	if ok {
-		Remote_call(successor, "DHT.Transfer_data", ip, &Null{})
+		Remote_call(successor, "DHT.Transfer_data", IP_pair{ip, node.IP}, &Null{})
 	}
 	node.Suc_lock.RLock()
 	successor = node.Successor_list[0]
@@ -246,10 +264,9 @@ func (node *Node) Notifty(ip string) error {
 	return nil
 }
 
-func (node *Node) Run() error {
+func (node *Node) Run() {
 	node.Online = true
 	go node.Serve()
-	return nil
 }
 
 func (node *Node) maintain() {
@@ -300,31 +317,51 @@ func (node *Node) Change_predecessor(ip string) {
 
 func (node *Node) Change_successor_list(list [3]string) {
 	node.Suc_lock.Lock()
-	for i := 1; i < 3; i++ { //将后继列表转移
-		node.Successor_list[i] = list[i-1]
+	for i := 0; i < 3; i++ { //将后继列表转移
+		node.Successor_list[i] = list[i]
 	}
 	node.Suc_lock.Unlock()
 }
 
 func (node *Node) Quit() {
-	node.Pre_lock.RLock()
-	predecessor := node.Predecessor
-	node.Pre_lock.RUnlock()
-	node.Suc_lock.RLock()
-	successor_list := node.Successor_list
-	node.Suc_lock.RUnlock()
-	online_successor, err := node.Get_successor()
-	if err != nil {
-		logrus.Errorf("Quiting error (IP = %s): %v.", node.IP, err)
-	}
-	if predecessor != "" {
-		Remote_call(predecessor, "DHT.Change_successor_list", successor_list, &Null{})
-	}
-	if err == nil {
-		Remote_call(online_successor, "DHT.Change_predecessor", predecessor, &Null{})
+	if !node.Online {
+		return
 	}
 	node.Online = false
 	close(node.quit)
+	node.Pre_lock.RLock()
+	predecessor := node.Predecessor
+	node.Pre_lock.RUnlock()
+	node.update_successor_list()
+	var successor_list [3]string
+	node.Suc_lock.RLock()
+	successor_list[0] = node.Successor_list[0]
+	successor_list[1] = node.Successor_list[1]
+	successor_list[2] = node.Successor_list[2]
+	node.Suc_lock.RUnlock()
+	if predecessor != "" {
+		Remote_call(predecessor, "DHT.Change_successor_list", successor_list, &Null{})
+	}
+	Remote_call(successor_list[0], "DHT.Change_predecessor", predecessor, &Null{})
+	go func() { //转移主数据
+		node.data_lock.RLock()
+		data := []Data_pair{}
+		for key, value_pair := range node.data {
+			data = append(data, Data_pair{key, value_pair})
+		}
+		node.data_lock.RUnlock()
+		Remote_call(successor_list[0], "DHT.Put_in_all", data, &Null{})
+		Remote_call(successor_list[0], "DHT.Delete_off_backup", data, &Null{})
+	}()
+	go func() { //转移备份
+		node.data_backup_lock.RLock()
+		data_backup := []Data_pair{}
+		for key, value_pair := range node.data_backup {
+			data_backup = append(data_backup, Data_pair{key, value_pair})
+		}
+		node.data_backup_lock.RUnlock()
+		Remote_call(successor_list[0], "DHT.Put_in_backup", data_backup, &Null{})
+	}()
 	logrus.Infof("Node (IP = %s, ID = %v) quits.", node.IP, node.ID)
 }
 
@@ -387,18 +424,11 @@ func (node *Node) ForceQuit() {
 
 func (node *Node) Put(key string, value string) bool {
 	id := get_hash(key)
-	node.Pre_lock.RLock()
-	pre := node.Predecessor
-	node.Pre_lock.RUnlock()
-	if belong(false, true, get_hash(pre), node.ID, id) {
-		node.Put_in([]Data_pair{{key, Value_pair{value, id}}})
-	} else {
-		ip, _ := node.Find_successor(id)
-		err := Remote_call(ip, "DHT.Put_in", []Data_pair{{key, Value_pair{value, id}}}, &Null{})
-		if err != nil {
-			logrus.Errorf("Node (IP = %s) putting in data error (key = %s, value = %s): %v.", node.IP, key, value, err)
-			return false
-		}
+	ip, _ := node.Find_successor(id)
+	err := Remote_call(ip, "DHT.Put_in_all", []Data_pair{{key, Value_pair{value, id}}}, &Null{})
+	if err != nil {
+		logrus.Errorf("Node (IP = %s) putting in data error (key = %s, value = %s): %v.", node.IP, key, value, err)
+		return false
 	}
 	logrus.Infof("Node (IP = %s) puts in data : key = %s, value = %s.", node.IP, key, value)
 	return true
@@ -410,6 +440,30 @@ func (node *Node) Put_in(data []Data_pair) error {
 		node.data[data[i].Key] = data[i].Value_pair
 	}
 	node.data_lock.Unlock()
+	return nil
+}
+
+func (node *Node) Put_in_all(data []Data_pair) error {
+	node.Put_in(data)
+	//后继节点放入备份数据
+	successor, err := node.Get_successor()
+	if err != nil {
+		logrus.Errorf("Getting successor error (IP = %s): %v.", node.IP, err)
+		return err
+	}
+	err = Remote_call(successor, "DHT.Put_in_backup", data, &Null{})
+	if err != nil {
+		logrus.Errorf("Putting in backup error (IP = %s): %v.", node.IP, err)
+	}
+	return nil
+}
+
+func (node *Node) Put_in_backup(data []Data_pair) error {
+	node.data_backup_lock.Lock()
+	for i := range data {
+		node.data_backup[data[i].Key] = data[i].Value_pair
+	}
+	node.data_backup_lock.Unlock()
 	return nil
 }
 
@@ -439,24 +493,59 @@ func (node *Node) Get_out(key string) (string, bool) {
 	return value_pair.Value, ok
 }
 
-func (node *Node) Transfer_data(to_ip string) error { //将数据转移到前节点
-	id := get_hash(to_ip)
+func (node *Node) Transfer_data(ips IP_pair) error { //将数据转移到前节点
+	pre_id := get_hash(ips.IP_pre)
+	pre_pre_id := get_hash(ips.IP_pre_pre)
+	//转移主数据
 	data := []Data_pair{}
 	node.data_lock.RLock()
 	for key, value_pair := range node.data {
-		if !belong(false, true, id, node.ID, value_pair.Key_id) {
+		if !belong(false, true, pre_id, node.ID, value_pair.Key_id) {
 			data = append(data, Data_pair{key, value_pair})
 		}
 	}
 	node.data_lock.RUnlock()
 	node.data_lock.Lock()
 	for _, data_pair := range data {
-		delete(node.data, data_pair.Key) //转移数据
+		delete(node.data, data_pair.Key)
 	}
 	node.data_lock.Unlock()
-	err := Remote_call(to_ip, "DHT.Put_in", data, &Null{})
+	err := Remote_call(ips.IP_pre, "DHT.Put_in", data, &Null{})
 	if err != nil {
-		logrus.Errorf("Node (IP = %s , to_ip = %s) transferring data error: %v.", node.IP, to_ip, err)
+		logrus.Errorf("Node (IP = %s , to_ip = %s) transferring data error: %v.", node.IP, ips.IP_pre, err)
+		return err
+	}
+	//转移主数据对应的备份
+	key_backup := []string{}
+	node.data_backup_lock.Lock()
+	for _, data_pair := range data {
+		node.data_backup[data_pair.Key] = data_pair.Value_pair
+		key_backup = append(key_backup, data_pair.Key)
+	}
+	node.data_backup_lock.Unlock()
+	successor, _ := node.Get_successor()
+	err = Remote_call(successor, "DHT.Delete_off_backup", key_backup, &Null{})
+	if err != nil {
+		logrus.Errorf("Node (IP = %s , suc_ip = %s) transferring backup data error: %v.", node.IP, successor, err)
+		return err
+	}
+	//转移备份
+	data_backup := []Data_pair{}
+	node.data_backup_lock.RLock()
+	for key, value_pair := range node.data_backup {
+		if !belong(false, true, pre_pre_id, pre_id, value_pair.Key_id) {
+			data_backup = append(data_backup, Data_pair{key, value_pair})
+		}
+	}
+	node.data_backup_lock.RUnlock()
+	node.data_backup_lock.Lock()
+	for _, data_pair := range data_backup {
+		delete(node.data_backup, data_pair.Key)
+	}
+	node.data_backup_lock.Unlock()
+	err = Remote_call(ips.IP_pre, "DHT.Put_in_backup", data_backup, &Null{})
+	if err != nil {
+		logrus.Errorf("Node (IP = %s , to_ip = %s) transferring backup data error: %v.", node.IP, ips.IP_pre, err)
 		return err
 	}
 	return nil
@@ -464,22 +553,11 @@ func (node *Node) Transfer_data(to_ip string) error { //将数据转移到前节
 
 func (node *Node) Delete(key string) bool {
 	id := get_hash(key)
-	node.Pre_lock.RLock()
-	pre := node.Predecessor
-	node.Pre_lock.RUnlock()
-	if belong(false, true, get_hash(pre), node.ID, id) {
-		ok := node.Delete_off([]string{key})
-		if !ok {
-			logrus.Errorf("Node (IP = %s) deleting off data error (key = %s).", node.IP, key)
-			return false
-		}
-	} else {
-		ip, _ := node.Find_successor(id)
-		err := Remote_call(ip, "DHT.Delete_off", []string{key}, &Null{})
-		if err != nil {
-			logrus.Errorf("Node (IP = %s) deleting off data error (key = %s): %v.", node.IP, key, err)
-			return false
-		}
+	ip, _ := node.Find_successor(id)
+	err := Remote_call(ip, "DHT.Delete_off", []string{key}, &Null{})
+	if err != nil {
+		logrus.Errorf("Node (IP = %s) deleting off data error (key = %s): %v.", node.IP, key, err)
+		return false
 	}
 	logrus.Infof("Node (IP = %s) delete off data : key = %s.", node.IP, key)
 	return true
@@ -497,5 +575,41 @@ func (node *Node) Delete_off(keys []string) bool {
 		}
 	}
 	node.data_lock.Unlock()
+	//删除后继节点的备份数据
+	successor, err := node.Get_successor()
+	if err != nil {
+		logrus.Errorf("Getting successor error (IP = %s): %v.", node.IP, err)
+		return false
+	}
+	err = Remote_call(successor, "DHT.Delete_off_backup", keys, &Null{})
+	if err != nil {
+		logrus.Errorf("Deleting off backup error (IP = %s): %v.", node.IP, err)
+		return false
+	}
 	return out
+}
+
+func (node *Node) Delete_off_backup(keys []string) bool {
+	out := true
+	node.data_backup_lock.Lock()
+	for _, key := range keys {
+		_, ok := node.data_backup[key]
+		if !ok {
+			out = false
+		} else {
+			delete(node.data_backup, key)
+		}
+	}
+	node.data_backup_lock.Unlock()
+	return out
+}
+func (node *Node) A() {
+
+	fmt.Println(node.IP, node.Predecessor, node.Successor_list[0])
+
+	fmt.Println(node.ID)
+
+	fmt.Println(node.Successor_list)
+
+	fmt.Println(Ping(node.IP))
 }

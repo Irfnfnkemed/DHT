@@ -58,6 +58,7 @@ func (node *Node) Serve() error {
 	if err != nil {
 		return err
 	}
+	close(node.start) //疏通开始通道
 	select {
 	case <-node.quit:
 		node.RPC.close_conn() //结束服务
