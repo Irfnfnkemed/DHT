@@ -15,10 +15,11 @@ var client_pool_lock sync.RWMutex
 type Node_rpc struct {
 	server   *rpc.Server
 	listener net.Listener
-	clients  chan *rpc.Client //容量为20
-	conns    chan net.Conn    //容量为20
+	clients  chan *rpc.Client //容量为20，容纳可用客户端
+	conns    chan net.Conn    //容量为40，容纳DIal()、Accept()产生的连接，在停止服务时关闭
 }
 
+// 远端调用
 func Remote_call(ip string, service_method string, args interface{}, reply interface{}) error {
 	logrus.Infof("Remote call (server IP = %s, service_method = %s).", ip, service_method)
 	client, err := get_client(ip)
@@ -37,6 +38,7 @@ func Remote_call(ip string, service_method string, args interface{}, reply inter
 	return nil
 }
 
+// 节点服务
 func (node *Node) Serve() error {
 	var err error = nil
 	node.RPC.server = rpc.NewServer()
@@ -69,6 +71,7 @@ func (node *Node) Serve() error {
 	return nil
 }
 
+// 测试节点是否上线
 func Ping(ip string) bool {
 	client, err := get_client(ip)
 	defer return_client(ip, client)
@@ -79,6 +82,7 @@ func Ping(ip string) bool {
 	return err == nil
 }
 
+// 创建一个节点的用户池
 func (node_rpc *Node_rpc) create_client(ip string) error {
 	node_rpc.clients = make(chan *rpc.Client, 20)
 	node_rpc.conns = make(chan net.Conn, 40)
@@ -106,6 +110,7 @@ func (node_rpc *Node_rpc) create_client(ip string) error {
 	return nil
 }
 
+// 得到可用用户
 func get_client(ip string) (*rpc.Client, error) {
 	client_pool_lock.RLock()
 	clients := client_pool[ip]
@@ -113,6 +118,7 @@ func get_client(ip string) (*rpc.Client, error) {
 	return <-clients, nil
 }
 
+// 归还用户
 func return_client(ip string, client *rpc.Client) error {
 	client_pool_lock.RLock()
 	client_pool[ip] <- client
@@ -120,12 +126,14 @@ func return_client(ip string, client *rpc.Client) error {
 	return nil
 }
 
+// 关闭相关连接
 func (node_rpc *Node_rpc) close_conn() {
 	for range node_rpc.conns {
 		(<-node_rpc.conns).Close()
 	}
 }
 
+// 构建客户端与服务器的连接
 func (node_rpc *Node_rpc) connect(client *rpc.Client) error {
 	go client.Call("DHT.Ping", Null{}, &Null{}) //尝试建立客户端与服务器的连接
 	conn, err := node_rpc.listener.Accept()

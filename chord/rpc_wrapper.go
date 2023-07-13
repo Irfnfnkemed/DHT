@@ -81,8 +81,8 @@ func (wrapper *RPC_wrapper) Transfer_data(ips IP_pair, _ *Null) error {
 	return wrapper.node.Transfer_data(ips)
 }
 
-func (wrapper *RPC_wrapper) Delete_off(keys []string, _ *Null) error {
-	ok := wrapper.node.Delete_off(keys)
+func (wrapper *RPC_wrapper) Delete_off_all(keys []string, _ *Null) error {
+	ok := wrapper.node.Delete_off_all(keys)
 	if ok {
 		return nil
 	} else {
