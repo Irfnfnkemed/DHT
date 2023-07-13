@@ -56,8 +56,7 @@ func init() {
 	f, _ := os.Create("dht-test.log")
 	logrus.SetOutput(f)
 	for i := range exp {
-		exp[i] = new(big.Int)
-		exp[i].Lsh(big.NewInt(1), uint(i)) //exp[i]存储2^i
+		exp[i] = new(big.Int).Lsh(big.NewInt(1), uint(i)) //exp[i]存储2^i
 	}
 }
 
