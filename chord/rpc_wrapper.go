@@ -98,3 +98,13 @@ func (wrapper *RPC_wrapper) Delete_off_backup(keys []string, _ *Null) error {
 		return errors.New("Delete off backup error.")
 	}
 }
+
+func (wrapper *RPC_wrapper) Lock(_Null, _ *Null) error {
+	wrapper.node.Lock()
+	return nil
+}
+
+func (wrapper *RPC_wrapper) Unlock(_Null, _ *Null) error {
+	wrapper.node.Unlock()
+	return nil
+}

@@ -45,6 +45,7 @@ type Node struct {
 	data_backup_lock sync.RWMutex
 	fix_index        int
 	finger_start     [161]*big.Int
+	block            sync.Mutex
 	start            chan bool
 	quit             chan bool
 }
@@ -138,8 +139,7 @@ func (node *Node) Quit() {
 	if !node.Online {
 		return
 	}
-	node.Online = false
-	close(node.quit)
+	node.block.Lock() //阻塞stablize
 	node.pre_lock.RLock()
 	predecessor := node.predecessor
 	node.pre_lock.RUnlock()
@@ -150,10 +150,24 @@ func (node *Node) Quit() {
 	successor_list[1] = node.successor_list[1]
 	successor_list[2] = node.successor_list[2]
 	node.suc_lock.RUnlock()
-	if predecessor != "" && predecessor != "OFFLINE" {
-		Remote_call(predecessor, "DHT.Change_successor_list", successor_list, &Null{})
-	}
-	Remote_call(successor_list[0], "DHT.Change_predecessor", predecessor, &Null{})
+	var wg sync.WaitGroup
+	wg.Add(4)
+	go func() {
+		if predecessor != "" && predecessor != "OFFLINE" && predecessor != node.IP {
+			Remote_call(predecessor, "DHT.Lock", Null{}, &Null{})
+		}
+		if predecessor != "" && predecessor != "OFFLINE" {
+			Remote_call(predecessor, "DHT.Change_successor_list", successor_list, &Null{})
+		}
+		wg.Done()
+	}()
+	go func() {
+		if predecessor != successor_list[0] && successor_list[0] != node.IP {
+			Remote_call(successor_list[0], "DHT.Lock", Null{}, &Null{})
+		}
+		Remote_call(successor_list[0], "DHT.Change_predecessor", predecessor, &Null{})
+		wg.Done()
+	}()
 	go func() { //转移主数据
 		node.data_lock.RLock()
 		data := []Data_pair{}
@@ -165,6 +179,7 @@ func (node *Node) Quit() {
 		node.data_lock.RUnlock()
 		Remote_call(successor_list[0], "DHT.Put_in_all", data, &Null{})
 		Remote_call(successor_list[0], "DHT.Delete_off_backup", keys, &Null{})
+		wg.Done()
 	}()
 	go func() { //转移备份
 		node.data_backup_lock.RLock()
@@ -174,7 +189,17 @@ func (node *Node) Quit() {
 		}
 		node.data_backup_lock.RUnlock()
 		Remote_call(successor_list[0], "DHT.Put_in_backup", data_backup, &Null{})
+		wg.Done()
 	}()
+	wg.Wait()
+	if predecessor != "" && predecessor != "OFFLINE" {
+		Remote_call(predecessor, "DHT.Unlock", Null{}, &Null{})
+	}
+	if predecessor != successor_list[0] {
+		Remote_call(successor_list[0], "DHT.Unlock", Null{}, &Null{})
+	}
+	node.Online = false
+	close(node.quit)
 	logrus.Infof("Node (IP = %s, ID = %v) quits.", node.IP, node.ID)
 }
 
@@ -283,6 +308,8 @@ func (node *Node) Get_predecessor() (string, error) {
 	predecessor := node.predecessor
 	node.pre_lock.RUnlock()
 	if predecessor != "" && !Ping(predecessor) {
+		node.pre_lock.RLock()
+		node.pre_lock.RUnlock()
 		node.pre_lock.Lock()
 		node.predecessor = "OFFLINE" //若前驱已下线，置上标记
 		predecessor = "OFFLINE"
@@ -317,8 +344,6 @@ func (node *Node) Get_predecessor() (string, error) {
 
 // 找到路由表中在目标位置前最近的上线节点
 func (node *Node) closest_preceding_finger(id *big.Int) string {
-	node.finger_lock.Lock()
-	defer node.finger_lock.Unlock()
 	for i := 160; i > 1; i-- {
 		if !Ping(node.finger[i]) { //已下线，将finger设为仍然上线的位置
 			if i == 160 {
@@ -389,7 +414,8 @@ func (node *Node) stabilize() error {
 // 修复前驱
 func (node *Node) Notifty(ip string) error {
 	node.pre_lock.Lock()
-	if node.predecessor == "" || belong(false, false, get_hash(node.predecessor), node.ID, get_hash(ip)) {
+	if node.predecessor == "" || node.predecessor == "OFFLINE" ||
+		belong(false, false, get_hash(node.predecessor), node.ID, get_hash(ip)) {
 		node.predecessor = ip
 	}
 	node.pre_lock.Unlock()
@@ -475,15 +501,19 @@ func (node *Node) fix_finger() error {
 func (node *Node) maintain() {
 	go func() {
 		for node.Online {
+			node.block.Lock()
 			node.stabilize()
-			time.Sleep(10 * time.Millisecond)
+			node.block.Unlock()
+			time.Sleep(20 * time.Millisecond)
 		}
+		logrus.Infof("Node (IP = %s) stops stablizing.", node.IP)
 	}()
 	go func() {
 		for node.Online {
 			node.fix_finger()
-			time.Sleep(10 * time.Millisecond)
+			time.Sleep(20 * time.Millisecond)
 		}
+		logrus.Infof("Node (IP = %s) stops fixing finger.", node.IP)
 	}()
 }
 
@@ -546,7 +576,7 @@ func (node *Node) update_successor_list() error {
 	}
 	node.suc_lock.Lock()
 	for i := range node.successor_list {
-		if i == 0 && ip != "" {
+		if i == 0 && ip != "" && ip != "OFFLINE" {
 			node.successor_list[0] = ip
 		} else {
 			node.successor_list[i] = node.IP
@@ -554,6 +584,16 @@ func (node *Node) update_successor_list() error {
 	}
 	node.suc_lock.Unlock()
 	return nil
+}
+
+// 上锁，以阻塞stabilize
+func (node *Node) Lock() {
+	node.block.Lock()
+}
+
+// 解锁，以恢复stabilize
+func (node *Node) Unlock() {
+	node.block.Unlock()
 }
 
 // 将数据存为某节点的主数据
@@ -592,11 +632,11 @@ func (node *Node) Put_in_all(data []Data_pair) error {
 	return nil
 }
 
-// 在某节点中查询数据
+// 在某节点主数据中查询数据
 func (node *Node) Get_out(key string) (string, bool) {
 	node.data_lock.RLock()
-	defer node.data_lock.RUnlock()
 	value_pair, ok := node.data[key]
+	node.data_lock.RUnlock()
 	return value_pair.Value, ok
 }
 
