@@ -2,11 +2,11 @@
 
 ## Chord
 ### 文件结构
-* **`chord.go`**:
+* **`chord/chord.go`**:
 实现chord的主体部分，包括节点的插入、退出，数据的插入、查找、删除，以及环结构的维护。同时还包括了一些辅助方法。
-* **`rpc_wrapper.go`**:
+* **`chord/rpc_wrapper.go`**:
 包裹`chord.go`中需要用到的远端调用的函数，便于注册服务和控制。
-* **`server_and_client.go`**:
+* **`rpc/rpc.go`**:
 实现了用户池(client pool)，在节点初始化时建立永久连接，避免运行时每次远端调用都重新建立连接，节约了大量时间。
 
 ### 一些细节与想法
