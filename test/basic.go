@@ -1,4 +1,4 @@
-package main
+package test
 
 import (
 	"fmt"
@@ -32,7 +32,7 @@ func basicTest() (bool, int, int) {
 	}
 
 	nodesInNetwork := make([]int, 0, basicTestNodeSize+1)
-
+	//basicTestAfterRunSleepTime
 	time.Sleep(basicTestAfterRunSleepTime)
 
 	/* Node 0 now creates a new network. */
@@ -63,6 +63,7 @@ func basicTest() (bool, int, int) {
 			time.Sleep(basicTestJoinQuitSleepTime)
 			nextJoinNode++
 		}
+
 		joinInfo.finish(&basicFailedCnt, &basicTotalCnt)
 
 		time.Sleep(basicTestAfterJoinQuitSleepTime)
@@ -204,7 +205,6 @@ func basicTest() (bool, int, int) {
 				} else {
 					delete2Info.success()
 				}
-
 				break
 			}
 		}

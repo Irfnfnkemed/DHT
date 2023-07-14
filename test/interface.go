@@ -1,4 +1,4 @@
-package main
+package test
 
 type dhtNode interface {
 	// "Run" is called after calling "NewNode". You can do some initialization works here.

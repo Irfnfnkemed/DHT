@@ -504,14 +504,14 @@ func (node *Node) maintain() {
 			node.block.Lock()
 			node.stabilize()
 			node.block.Unlock()
-			time.Sleep(20 * time.Millisecond)
+			time.Sleep(5 * time.Millisecond)
 		}
 		logrus.Infof("Node (IP = %s) stops stablizing.", node.IP)
 	}()
 	go func() {
 		for node.Online {
 			node.fix_finger()
-			time.Sleep(20 * time.Millisecond)
+			time.Sleep(5 * time.Millisecond)
 		}
 		logrus.Infof("Node (IP = %s) stops fixing finger.", node.IP)
 	}()
