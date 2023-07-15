@@ -1,7 +1,6 @@
 package chord
 
 import (
-	"crypto/sha1"
 	"math/big"
 	"math/rand"
 	"os"
@@ -309,7 +308,7 @@ func (node *Node) GetPredecessor() (string, error) {
 	node.preLock.RLock()
 	predecessor := node.predecessor
 	node.preLock.RUnlock()
-	if predecessor != "" && !rpc.Ping(predecessor, "DHT") {
+	if predecessor != "" && !Ping(predecessor) {
 		node.preLock.RLock()
 		node.preLock.RUnlock()
 		node.preLock.Lock()
@@ -347,7 +346,7 @@ func (node *Node) GetPredecessor() (string, error) {
 // 找到路由表中在目标位置前最近的上线节点
 func (node *Node) closestPrecedingFinger(id *big.Int) string {
 	for i := 160; i > 1; i-- {
-		if !rpc.Ping(node.finger[i], "DHT") { //已下线，将finger设为仍然上线的位置
+		if !Ping(node.finger[i]) { //已下线，将finger设为仍然上线的位置
 			if i == 160 {
 				node.finger[i] = node.IP
 			} else {
@@ -359,12 +358,18 @@ func (node *Node) closestPrecedingFinger(id *big.Int) string {
 	}
 	node.sucLock.Lock()
 	defer node.sucLock.Unlock()
-	if !rpc.Ping(node.successorList[0], "DHT") { //已下线，将finger设为仍然上线的位置
+	if !Ping(node.successorList[0]) { //已下线，将finger设为仍然上线的位置
 		node.successorList[0] = node.IP
 	} else if belong(false, false, node.ID, id, getHash(node.successorList[0])) {
 		return node.successorList[0]
 	}
 	return node.IP
+}
+
+// 测试节点是否上线
+func Ping(ip string) bool {
+	err := rpc.RemoteCall(ip, "DHT.Ping", Null{}, &Null{})
+	return err == nil
 }
 
 // 修护前驱后继，并相应地转移数据
@@ -506,14 +511,14 @@ func (node *Node) maintain() {
 			node.block.Lock()
 			node.stabilize()
 			node.block.Unlock()
-			time.Sleep(5 * time.Millisecond)
+			time.Sleep(50 * time.Millisecond)
 		}
 		logrus.Infof("Node (IP = %s) stops stablizing.", node.IP)
 	}()
 	go func() {
 		for node.Online {
 			node.fixFinger()
-			time.Sleep(5 * time.Millisecond)
+			time.Sleep(50 * time.Millisecond)
 		}
 		logrus.Infof("Node (IP = %s) stops fixing finger.", node.IP)
 	}()
@@ -555,7 +560,7 @@ func (node *Node) updateSuccessorList() error {
 	}
 	node.sucLock.RUnlock()
 	for _, ip := range tmp {
-		if rpc.Ping(ip, "DHT") { //找到最近的存在的后继
+		if Ping(ip) { //找到最近的存在的后继
 			err := rpc.RemoteCall(ip, "DHT.GetSuccessorList", Null{}, &nextSuccessorList)
 			if err != nil {
 				logrus.Errorf("Getting successor list error (IP = %s): %v.", node.IP, err)
@@ -683,53 +688,4 @@ func (node *Node) DeleteOffBackup(keys []string) bool {
 	}
 	node.dataBackupLock.Unlock()
 	return out
-}
-
-// 得到hash值
-func getHash(ip string) *big.Int {
-	hash := sha1.Sum([]byte(ip))
-	hashInt := new(big.Int)
-	return hashInt.SetBytes(hash[:])
-}
-
-// 判断是否在目标区间内
-func belong(leftOpen, rightOpen bool, beg, end, tar *big.Int) bool {
-	cmpBegEnd, cmpTarBeg, cmpTarEnd := beg.Cmp(end), tar.Cmp(beg), tar.Cmp(end)
-	if cmpBegEnd == -1 {
-		if cmpTarBeg == -1 || cmpTarEnd == 1 {
-			return false
-		} else if cmpTarBeg == 1 && cmpTarEnd == -1 {
-			return true
-		} else if cmpTarBeg == 0 {
-			return leftOpen
-		} else if cmpTarEnd == 0 {
-			return rightOpen
-		}
-	} else if cmpBegEnd == 1 {
-		if cmpTarBeg == -1 && cmpTarEnd == 1 {
-			return false
-		} else if cmpTarBeg == 1 || cmpTarEnd == -1 {
-			return true
-		} else if cmpTarBeg == 0 {
-			return leftOpen
-		} else if cmpTarEnd == 0 {
-			return rightOpen
-		}
-	} else if cmpBegEnd == 0 { //两端点重合
-		if cmpTarBeg == 0 {
-			return leftOpen || rightOpen
-		} else {
-			return true
-		}
-	}
-	return false
-}
-
-// 计算n+2^i并对2^160取模
-func cal(n *big.Int, i int) *big.Int {
-	tmp := new(big.Int).Add(n, exp[i])
-	if tmp.Cmp(exp[160]) >= 0 {
-		tmp.Sub(tmp, exp[160])
-	}
-	return tmp
 }
