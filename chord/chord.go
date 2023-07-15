@@ -51,15 +51,11 @@ type Node struct {
 	quit           chan bool
 }
 
-var exp [161]*big.Int
-
 // 整体初始化
 func init() {
 	f, _ := os.Create("dht-test.log")
 	logrus.SetOutput(f)
-	for i := range exp {
-		exp[i] = new(big.Int).Lsh(big.NewInt(1), uint(i)) //exp[i]存储2^i
-	}
+	initCal()
 }
 
 // 节点初始化

@@ -5,6 +5,8 @@ import (
 	"math/big"
 )
 
+var exp [161]*big.Int
+
 // 得到hash值
 func getHash(ip string) *big.Int {
 	hash := sha1.Sum([]byte(ip))
@@ -43,6 +45,12 @@ func belong(leftOpen, rightOpen bool, beg, end, tar *big.Int) bool {
 		}
 	}
 	return false
+}
+
+func initCal() {
+	for i := range exp {
+		exp[i] = new(big.Int).Lsh(big.NewInt(1), uint(i)) //exp[i]存储2^i
+	}
 }
 
 // 计算n+2^i并对2^160取模
