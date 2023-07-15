@@ -17,3 +17,15 @@ func (wrapper *RPCWrapper) Ping(ipFrom string, _ *Null) error {
 	}
 	return errors.New("Offline node.")
 }
+
+func (wrapper *RPCWrapper) FindNode(ips callArgs, findList *[]string) error {
+	ipTo := ips.args.(string)
+	list := wrapper.node.FindNode(ipTo)
+	for _, ipFind := range list {
+		*findList = append(*findList, ipFind)
+	}
+	if ips.ipFrom != wrapper.node.IP {
+		wrapper.node.flush(ips.ipFrom)
+	}
+	return nil
+}

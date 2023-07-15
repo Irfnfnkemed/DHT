@@ -10,8 +10,8 @@ import (
 )
 
 type callArgs struct {
-	ip   string
-	args interface{}
+	ipFrom string
+	args   interface{}
 }
 
 type ValuePair struct {
@@ -63,11 +63,15 @@ func (node *Node) Run() {
 }
 
 // 找到节点已知的距离目标最近的k个节点ip
-func (node *Node) findNode(ip string) []string {
+func (node *Node) FindNode(ip string) []string {
 	i := belong(node.ID, getHash(ip))
 	nodeList := []string{}
-	for p := node.buckets[i].begin(); p != node.buckets[i].end(); p = p.next {
-		nodeList = append(nodeList, p.ip)
+	if i == -1 {
+		nodeList = append(nodeList, node.IP) //自身是最近的
+	} else {
+		for p := node.buckets[i].begin(); p != node.buckets[i].end(); p = p.next {
+			nodeList = append(nodeList, p.ip)
+		}
 	}
 	if len(nodeList) == k {
 		return nodeList
@@ -88,6 +92,9 @@ func (node *Node) findNode(ip string) []string {
 			}
 		}
 	}
+	if i != -1 {
+		nodeList = append(nodeList, node.IP)
+	}
 	return nodeList
 }
 
@@ -100,4 +107,41 @@ func Ping(ipFrom, ipTo string) bool {
 func (node *Node) flush(ip string) {
 	i := belong(node.ID, getHash(ip))
 	node.buckets[i].flush(ip)
+}
+
+// 找到系统中距离目标最近的k个节点ip
+func (node *Node) nodeLookup(ip string) []string {
+	order := Order{}
+	order.init(ip)
+	list := node.FindNode(ip)
+	for _, ipFind := range list {
+		order.insert(ipFind)
+	}
+	for {
+		callList := order.get()
+		findList := findNodeList(callList, ip)
+		flag := order.flush(findList) //更新order
+		if !flag {
+			callList = order.getUndone()
+			findList = findNodeList(callList, ip)
+			flag = order.flush(findList) //更新order
+		}
+		if !flag {
+			break
+		}
+	}
+	return order.getClosest()
+}
+
+func findNodeList(callList []*orderUnit, ipTarget string) []string {
+	findList := []string{}
+	for _, p := range callList {
+		err := rpc.RemoteCall(p.ip, "DHT.FindNode", callArgs{p.ip, ipTarget}, &findList)
+		if err != nil {
+			logrus.Errorf("FindNode error, server IP = %s", p.ip)
+			continue
+		}
+		p.done = true
+	}
+	return findList
 }

@@ -49,25 +49,24 @@ func (bucket *Bucket) getSize() int {
 }
 
 // 将目标节点提到链表头部
-func (bucket *Bucket) shiftToHead(p *unit) error {
+func (bucket *Bucket) shiftToHead(p *unit) {
 	p.prev.next = p.next
 	p.next.prev = p.prev
 	p.prev = bucket.head
 	p.next = bucket.head.next
 	bucket.head.next.prev = p
 	bucket.head.next = p
-	return nil
 }
 
-func (bucket *Bucket) find(ip string) (*unit, error) {
+func (bucket *Bucket) find(ip string) *unit {
 	p := bucket.head.next
 	for p != bucket.tail {
 		if p.ip == ip {
-			return p, nil
+			return p
 		}
 		p = p.next
 	}
-	return nil, errors.New("Not found.")
+	return nil
 }
 
 func (bucket *Bucket) begin() *unit {
@@ -79,8 +78,8 @@ func (bucket *Bucket) end() *unit {
 }
 
 func (bucket *Bucket) flush(ip string) {
-	p, err := bucket.find(ip)
-	if err == nil {
+	p := bucket.find(ip)
+	if p != nil {
 		bucket.shiftToHead(p)
 	} else if bucket.size < k {
 		bucket.insertToHead(ip)
