@@ -85,6 +85,7 @@ func (order *Order) insert(ip string) {
 		}
 		p = p.next
 	}
+	order.size++
 	newUnit := orderUnit{p.prev, p, ip, dis, false}
 	p.prev.next = &newUnit
 	p.prev = &newUnit
@@ -144,4 +145,10 @@ func (order *Order) getClosest() []string {
 		p = p.next
 	}
 	return getList
+}
+
+func (order *Order) delete(p *orderUnit) {
+	p.next.prev = p.prev
+	p.prev.next = p.next
+	order.size--
 }

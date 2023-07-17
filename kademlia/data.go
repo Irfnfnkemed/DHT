@@ -45,11 +45,11 @@ func (data *Data) get(key string) (string, bool) {
 }
 
 func (data *Data) put(key, value string) {
-	data.dataLock.RLock()
+	data.dataLock.Lock()
 	data.dataPair[key] = value
 	data.republishTime[key] = time.Now().Add(10 * time.Second)
 	data.abandonTime[key] = time.Now().Add(15 * time.Second)
-	data.dataLock.RUnlock()
+	data.dataLock.Unlock()
 }
 
 func (data *Data) abandon() {

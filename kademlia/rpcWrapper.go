@@ -2,6 +2,8 @@ package kademlia
 
 import (
 	"errors"
+
+	"github.com/sirupsen/logrus"
 )
 
 type RPCWrapper struct {
@@ -10,22 +12,47 @@ type RPCWrapper struct {
 
 func (wrapper *RPCWrapper) Ping(ipFrom string, _ *Null) error {
 	if wrapper.node.Online {
-		if ipFrom != wrapper.node.IP {
-			wrapper.node.flush(ipFrom)
-		}
 		return nil
 	}
 	return errors.New("Offline node.")
 }
 
-func (wrapper *RPCWrapper) FindNode(ips callArgs, findList *[]string) error {
-	ipTo := ips.args.(string)
-	list := wrapper.node.FindNode(ipTo)
+func (wrapper *RPCWrapper) FindNode(pair IpPairs, findList *[]string) error {
+	list := wrapper.node.FindNode(pair.IpTo)
 	for _, ipFind := range list {
 		*findList = append(*findList, ipFind)
 	}
-	if ips.ipFrom != wrapper.node.IP {
-		wrapper.node.flush(ips.ipFrom)
+	if pair.IpFrom != wrapper.node.IP {
+		wrapper.node.flush(pair.IpFrom, true)
+	}
+	return nil
+}
+
+func (wrapper *RPCWrapper) PutIn(pair IpDataPairs, _ *Null) error {
+	wrapper.node.PutIn(pair.Datas)
+	if pair.IpFrom != wrapper.node.IP {
+		wrapper.node.flush(pair.IpFrom, true)
+	}
+	return nil
+}
+
+func (wrapper *RPCWrapper) FlushData(pair IpDataPairs, _ *Null) error {
+	wrapper.node.FlushData(pair.Datas)
+	if pair.IpFrom != wrapper.node.IP {
+		wrapper.node.flush(pair.IpFrom, true)
+	}
+	return nil
+}
+
+func (wrapper *RPCWrapper) Getout(pair IpPairs, value *string) error {
+	ok := false
+	ok, *value = wrapper.node.Getout(pair.IpTo)
+	if !ok {
+		logrus.Errorf("Getting out error, IP = %s.", wrapper.node.IP)
+		return errors.New("Fail to get out data.")
+	}
+	if pair.IpFrom != wrapper.node.IP {
+		wrapper.node.flush(pair.IpFrom, true)
 	}
 	return nil
 }
