@@ -5,16 +5,135 @@ import (
 	"math/big"
 )
 
-type Null struct{}
-
 var exp [161]*big.Int
 
-const a = 3
-
+// 初始化
 func initCal() {
 	for i := range exp {
 		exp[i] = new(big.Int).Lsh(big.NewInt(1), uint(i)) //exp[i]存储2^i
 	}
+}
+
+// order链表的内部节点
+type orderUnit struct {
+	prev *orderUnit
+	next *orderUnit
+	ip   string
+	dis  *big.Int
+	done bool
+}
+
+// 从头部至尾部，按找离目标距离从小到大排序(用于NodeLookup和Get)
+type Order struct {
+	head     *orderUnit
+	tail     *orderUnit
+	idTarget *big.Int
+	size     int
+}
+
+// 初始化
+func (order *Order) init(ipTarget string) {
+	order.head = new(orderUnit)
+	order.tail = new(orderUnit)
+	order.head.next, order.head.prev = order.tail, nil
+	order.tail.next, order.tail.prev = nil, order.head
+	order.size = 0
+	order.idTarget = getHash(ipTarget)
+}
+
+// 查找order中ip所在节点
+func (order *Order) find(ip string) *orderUnit {
+	p := order.head.next
+	for p != order.tail {
+		if p.ip == ip {
+			return p
+		}
+		p = p.next
+	}
+	return nil
+}
+
+// 按序插入order
+func (order *Order) insert(ip string) {
+	dis := xor(getHash(ip), order.idTarget)
+	p := order.head.next
+	for p != order.tail {
+		if dis.Cmp(p.dis) < 0 {
+			break
+		}
+		p = p.next
+	}
+	order.size++
+	newUnit := orderUnit{p.prev, p, ip, dis, false}
+	p.prev.next = &newUnit
+	p.prev = &newUnit
+}
+
+// 得到order中的前a个未执行查找的节点
+func (order *Order) getUndoneAlpha() []*orderUnit {
+	p := order.head.next
+	getList := []*orderUnit{}
+	size := 0
+	for p != order.tail {
+		if !p.done {
+			getList = append(getList, p)
+			size++
+		}
+		if size == a {
+			break
+		}
+		p = p.next
+	}
+	return getList
+}
+
+// 得到order中所有的未执行查找的节点
+func (order *Order) getUndoneAll() []*orderUnit {
+	callList := []*orderUnit{}
+	p := order.head.next
+	for p != order.tail {
+		if !p.done {
+			callList = append(callList, p)
+		}
+		p = p.next
+	}
+	return callList
+}
+
+// 得到order中前k个ip
+func (order *Order) getClosest() []string {
+	getList := []string{}
+	p := order.head.next
+	size := 0
+	for p != order.tail {
+		getList = append(getList, p.ip)
+		size++
+		if size == k {
+			break
+		}
+		p = p.next
+	}
+	return getList
+}
+
+// 从order中删去节点
+func (order *Order) delete(p *orderUnit) {
+	p.next.prev = p.prev
+	p.prev.next = p.next
+	order.size--
+}
+
+// 根据找到的节点列表，刷新order
+func (order *Order) flush(findList []string) bool {
+	flag := false
+	for _, ipFind := range findList {
+		p := order.find(ipFind)
+		if p == nil {
+			flag = true
+			order.insert(ipFind)
+		}
+	}
+	return flag
 }
 
 // 得到hash值
@@ -38,117 +157,4 @@ func belong(idFrom, idTo *big.Int) int {
 		}
 	}
 	return -1 //表明idFrom和idTo相同
-}
-
-type orderUnit struct {
-	prev *orderUnit
-	next *orderUnit
-	ip   string
-	dis  *big.Int
-	done bool
-}
-
-// 从头部至尾部，按找离目标距离从小到大排序
-type Order struct {
-	head     *orderUnit
-	tail     *orderUnit
-	idTarget *big.Int
-	size     int
-}
-
-func (order *Order) init(ipTarget string) {
-	order.head = new(orderUnit)
-	order.tail = new(orderUnit)
-	order.head.next, order.head.prev = order.tail, nil
-	order.tail.next, order.tail.prev = nil, order.head
-	order.size = 0
-	order.idTarget = getHash(ipTarget)
-}
-
-func (order *Order) find(ip string) *orderUnit {
-	p := order.head.next
-	for p != order.tail {
-		if p.ip == ip {
-			return p
-		}
-		p = p.next
-	}
-	return nil
-}
-
-func (order *Order) insert(ip string) {
-	dis := xor(getHash(ip), order.idTarget)
-	p := order.head.next
-	for p != order.tail {
-		if dis.Cmp(p.dis) < 0 {
-			break
-		}
-		p = p.next
-	}
-	order.size++
-	newUnit := orderUnit{p.prev, p, ip, dis, false}
-	p.prev.next = &newUnit
-	p.prev = &newUnit
-}
-
-func (order *Order) get() []*orderUnit {
-	p := order.head.next
-	getList := []*orderUnit{}
-	size := 0
-	for p != order.tail {
-		if !p.done {
-			getList = append(getList, p)
-			size++
-		}
-		if size == a {
-			break
-		}
-		p = p.next
-	}
-	return getList
-}
-
-func (order *Order) flush(findList []string) bool {
-	flag := false
-	for _, ipFind := range findList {
-		p := order.find(ipFind)
-		if p == nil {
-			flag = true
-			order.insert(ipFind)
-		}
-	}
-	return flag
-}
-
-func (order *Order) getUndone() []*orderUnit {
-	callList := []*orderUnit{}
-	p := order.head.next
-	for p != order.tail {
-		if !p.done {
-			callList = append(callList, p)
-		}
-		p = p.next
-	}
-	return callList
-}
-
-func (order *Order) getClosest() []string {
-	getList := []string{}
-	p := order.head.next
-	size := 0
-	for p != order.tail {
-		getList = append(getList, p.ip)
-		size++
-		if size == k {
-			break
-		}
-		p = p.next
-	}
-	return getList
-}
-
-func (order *Order) delete(p *orderUnit) {
-	p.next.prev = p.prev
-	p.prev.next = p.next
-	order.size--
 }

@@ -36,14 +36,6 @@ func (wrapper *RPCWrapper) PutIn(pair IpDataPairs, _ *Null) error {
 	return nil
 }
 
-func (wrapper *RPCWrapper) FlushData(pair IpDataPairs, _ *Null) error {
-	wrapper.node.FlushData(pair.Datas)
-	if pair.IpFrom != wrapper.node.IP {
-		wrapper.node.flush(pair.IpFrom, true)
-	}
-	return nil
-}
-
 func (wrapper *RPCWrapper) Getout(pair IpPairs, value *string) error {
 	ok := false
 	ok, *value = wrapper.node.Getout(pair.IpTo)

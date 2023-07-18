@@ -7,14 +7,14 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-const k = 16
-
+// bucket内部的链表节点
 type unit struct {
 	prev *unit
 	next *unit
 	ip   string
 }
 
+// 每个bucket都是一个链表
 type Bucket struct {
 	head *unit
 	tail *unit
@@ -36,7 +36,7 @@ func (bucket *Bucket) init(ip string) error {
 	return nil
 }
 
-// 插入节点至链表头部
+// 插入节点至bucket头部
 func (bucket *Bucket) insertToHead(ip string) error {
 	bucket.lock.Lock()
 	defer bucket.lock.Unlock()
@@ -50,13 +50,7 @@ func (bucket *Bucket) insertToHead(ip string) error {
 	return nil
 }
 
-func (bucket *Bucket) getSize() int {
-	bucket.lock.RLock()
-	defer bucket.lock.RUnlock()
-	return bucket.size
-}
-
-// 将目标节点提到链表头部
+// 将目标节点提到bucket头部
 func (bucket *Bucket) shiftToHead(p *unit) {
 	bucket.lock.Lock()
 	defer bucket.lock.Unlock()
@@ -71,6 +65,14 @@ func (bucket *Bucket) shiftToHead(p *unit) {
 	bucket.head.next = p
 }
 
+// 得到bucket存储ip数量
+func (bucket *Bucket) getSize() int {
+	bucket.lock.RLock()
+	defer bucket.lock.RUnlock()
+	return bucket.size
+}
+
+// 查找bucket中目标ip的位置
 func (bucket *Bucket) find(ip string) *unit {
 	bucket.lock.RLock()
 	defer bucket.lock.RUnlock()
@@ -84,6 +86,7 @@ func (bucket *Bucket) find(ip string) *unit {
 	return nil
 }
 
+// 删除bucket中的目标ip
 func (bucket *Bucket) delete(p *unit) {
 	bucket.lock.Lock()
 	defer bucket.lock.Unlock()
@@ -97,6 +100,7 @@ func (bucket *Bucket) delete(p *unit) {
 	p.next = nil
 }
 
+// 刷新bucket中的节点分布与顺序(用于remote call之后)
 func (bucket *Bucket) flush(ip string, online bool) {
 	if ip == bucket.ip {
 		return
@@ -138,6 +142,7 @@ func (bucket *Bucket) flush(ip string, online bool) {
 	logrus.Infof("Node (IP = %s) flushed the k-bucket.", bucket.ip)
 }
 
+// 给出bucket中所有的ip
 func (bucket *Bucket) getAll() []string {
 	nodeList := []string{}
 	bucket.lock.RLock()

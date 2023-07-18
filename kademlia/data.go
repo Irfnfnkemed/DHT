@@ -13,10 +13,11 @@ type DataPair struct {
 type Data struct {
 	dataPair      map[string]string
 	dataLock      sync.RWMutex
-	republishTime map[string]time.Time
-	abandonTime   map[string]time.Time
+	republishTime map[string]time.Time //重新发布时间
+	abandonTime   map[string]time.Time //舍弃时间
 }
 
+// 初始化
 func (data *Data) Init() {
 	data.dataLock.Lock()
 	data.dataPair = make(map[string]string)
@@ -25,6 +26,7 @@ func (data *Data) Init() {
 	data.dataLock.Unlock()
 }
 
+// 给出所有需要重新发布的数据
 func (data *Data) getRepublishList() []DataPair {
 	republishList := []DataPair{}
 	data.dataLock.RLock()
@@ -37,6 +39,7 @@ func (data *Data) getRepublishList() []DataPair {
 	return republishList
 }
 
+// 查找数据
 func (data *Data) get(key string) (string, bool) {
 	data.dataLock.RLock()
 	value, ok := data.dataPair[key]
@@ -44,14 +47,16 @@ func (data *Data) get(key string) (string, bool) {
 	return value, ok
 }
 
+// 存入数据
 func (data *Data) put(key, value string) {
 	data.dataLock.Lock()
 	data.dataPair[key] = value
-	data.republishTime[key] = time.Now().Add(10 * time.Second)
+	data.republishTime[key] = time.Now().Add(8 * time.Second)
 	data.abandonTime[key] = time.Now().Add(25 * time.Second)
 	data.dataLock.Unlock()
 }
 
+// 舍弃过期数据
 func (data *Data) abandon() {
 	keyList := []string{}
 	data.dataLock.Lock()
@@ -65,13 +70,5 @@ func (data *Data) abandon() {
 		delete(data.republishTime, key)
 		delete(data.abandonTime, key)
 	}
-	data.dataLock.Unlock()
-}
-
-func (data *Data) flush(dataPair DataPair) {
-	data.dataLock.Lock()
-	data.dataPair[dataPair.Key] = dataPair.Value
-	data.republishTime[dataPair.Key] = time.Now().Add(10 * time.Second)
-	data.abandonTime[dataPair.Key] = time.Now().Add(25 * time.Second)
 	data.dataLock.Unlock()
 }
