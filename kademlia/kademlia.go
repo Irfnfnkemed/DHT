@@ -26,6 +26,11 @@ type IpDataPairs struct {
 	Datas  DataPair
 }
 
+type IpIdPairs struct {
+	IpFrom string
+	IdTo   *big.Int
+}
+
 type Node struct {
 	Online       bool
 	RPC          rpc.NodeRpc
@@ -85,14 +90,14 @@ func (node *Node) Join(ip string) bool {
 	}
 	i := belong(node.ID, getHash(ip))
 	node.buckets[i].insertToHead(ip)
-	node.nodeLookup(node.IP) //通过查找自身，更新路由表
+	node.nodeLookup(node.ID) //通过查找自身，更新路由表
 	node.maintain()
 	return true
 }
 
 // 存入数据
 func (node *Node) Put(key string, value string) bool {
-	nodeList := node.nodeLookup(key)
+	nodeList := node.nodeLookup(getHash(key))
 	flag := false
 	for _, ip := range nodeList {
 		if node.IP == ip {
@@ -115,8 +120,8 @@ func (node *Node) Put(key string, value string) bool {
 // 查找数据
 func (node *Node) Get(key string) (bool, string) {
 	order := Order{}
-	order.init(key)
-	list := node.FindNode(key)
+	order.init(getHash(key))
+	list := node.FindNode(getHash(key))
 	for _, ipFind := range list {
 		order.insert(ipFind)
 	}
@@ -183,8 +188,8 @@ func (node *Node) flush(ip string, online bool) {
 }
 
 // 找到节点已知的距离目标最近的k个节点ip
-func (node *Node) FindNode(ip string) []string {
-	i := belong(node.ID, getHash(ip))
+func (node *Node) FindNode(id *big.Int) []string {
+	i := belong(node.ID, id)
 	nodeList := []string{}
 	if i == -1 {
 		nodeList = append(nodeList, node.IP) //自身是最近的
@@ -222,20 +227,20 @@ func (node *Node) FindNode(ip string) []string {
 }
 
 // 找到系统中距离目标最近的k个节点ip
-func (node *Node) nodeLookup(ip string) []string {
+func (node *Node) nodeLookup(id *big.Int) []string {
 	order := Order{}
-	order.init(ip)
-	list := node.FindNode(ip)
+	order.init(id)
+	list := node.FindNode(id)
 	for _, ipFind := range list {
 		order.insert(ipFind)
 	}
 	for {
 		callList := order.getUndoneAlpha()
-		findList := node.findNodeList(&order, callList, ip)
+		findList := node.findNodeList(&order, callList, id)
 		flag := order.flush(findList) //更新order
 		if !flag {
 			callList = order.getUndoneAll()
-			findList = node.findNodeList(&order, callList, ip)
+			findList = node.findNodeList(&order, callList, id)
 			flag = order.flush(findList) //更新order
 		}
 		if !flag {
@@ -246,11 +251,11 @@ func (node *Node) nodeLookup(ip string) []string {
 }
 
 // 给出可能的最近k个的目标的候补列表（用于NodeLookup）
-func (node *Node) findNodeList(order *Order, callList []*orderUnit, ipTarget string) []string {
+func (node *Node) findNodeList(order *Order, callList []*orderUnit, idTarget *big.Int) []string {
 	findList := []string{}
 	for _, p := range callList {
 		p.done = true
-		err := rpc.RemoteCall(p.ip, "DHT.FindNode", IpPairs{node.IP, ipTarget}, &findList)
+		err := rpc.RemoteCall(p.ip, "DHT.FindNode", IpIdPairs{node.IP, idTarget}, &findList)
 		node.flush(p.ip, err == nil)
 		if err != nil {
 			logrus.Errorf("FindNode error, server IP = %s", p.ip)
@@ -275,7 +280,7 @@ func (node *Node) republish() {
 
 // 发布一条数据
 func (node *Node) republishData(dataPair DataPair, wg *sync.WaitGroup) {
-	nodeList := node.nodeLookup(dataPair.Key)
+	nodeList := node.nodeLookup(getHash(dataPair.Key))
 	for _, ip := range nodeList {
 		if ip == node.IP {
 			node.PutIn(dataPair)
@@ -305,7 +310,7 @@ func (node *Node) Getout(key string) (bool, string) {
 func (node *Node) findValueList(order *Order, callList []*orderUnit, key string) (findList []string, value string) {
 	for _, p := range callList {
 		p.done = true
-		err := rpc.RemoteCall(p.ip, "DHT.FindNode", IpPairs{node.IP, key}, &findList)
+		err := rpc.RemoteCall(p.ip, "DHT.FindNode", IpIdPairs{node.IP, getHash(key)}, &findList)
 		node.flush(p.ip, err == nil)
 		if err != nil {
 			logrus.Errorf("FindNode error, server IP = %s", p.ip)
@@ -329,26 +334,36 @@ func (node *Node) abandon() {
 	node.data.abandon()
 }
 
+// 定期检查bucket，尽量使得bucket不要为空
+func (node *Node) refresh() {
+	node.buckets[node.refreshIndex].check()
+	if node.buckets[node.refreshIndex].getSize() < 4 {
+		node.nodeLookup(exp[node.refreshIndex])
+	}
+	node.refreshIndex = (node.refreshIndex + 1) % 160
+}
+
 // 定期维护结构与数据分布
 func (node *Node) maintain() {
 	go func() {
 		for node.Online {
 			node.republish()
-			time.Sleep(10 * time.Second)
+			time.Sleep(8 * time.Second)
 		}
 		logrus.Infof("Node (IP = %s) stops republishing.", node.IP)
 	}()
 	go func() {
 		for node.Online {
 			node.abandon()
-			time.Sleep(10 * time.Second)
+			time.Sleep(15 * time.Second)
 		}
 		logrus.Infof("Node (IP = %s) stops abandoning.", node.IP)
 	}()
+	go func() {
+		for node.Online {
+			node.refresh()
+			time.Sleep(10 * time.Second)
+		}
+		logrus.Infof("Node (IP = %s) stops refreshing.", node.IP)
+	}()
 }
-
-// func (node *Node) refresh() {
-// 	if node.buckets[node.refreshIndex].getSize() <= 1 {
-// 		node.nodeLookup()
-// 	}
-// }

@@ -17,6 +17,9 @@ type Data struct {
 	abandonTime   map[string]time.Time //舍弃时间
 }
 
+const RepublishTime = 8 * time.Second
+const AbandonTime = 20 * time.Second
+
 // 初始化
 func (data *Data) Init() {
 	data.dataLock.Lock()
@@ -51,8 +54,8 @@ func (data *Data) get(key string) (string, bool) {
 func (data *Data) put(key, value string) {
 	data.dataLock.Lock()
 	data.dataPair[key] = value
-	data.republishTime[key] = time.Now().Add(8 * time.Second)
-	data.abandonTime[key] = time.Now().Add(25 * time.Second)
+	data.republishTime[key] = time.Now().Add(RepublishTime)
+	data.abandonTime[key] = time.Now().Add(AbandonTime)
 	data.dataLock.Unlock()
 }
 

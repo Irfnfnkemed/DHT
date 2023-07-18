@@ -54,7 +54,7 @@ func (bucket *Bucket) insertToHead(ip string) error {
 func (bucket *Bucket) shiftToHead(p *unit) {
 	bucket.lock.Lock()
 	defer bucket.lock.Unlock()
-	if p == bucket.head || p == bucket.tail || p.prev == nil || p.next == nil {
+	if p == nil || p == bucket.head || p == bucket.tail || p.prev == nil || p.next == nil {
 		return
 	}
 	p.prev.next = p.next
@@ -90,7 +90,7 @@ func (bucket *Bucket) find(ip string) *unit {
 func (bucket *Bucket) delete(p *unit) {
 	bucket.lock.Lock()
 	defer bucket.lock.Unlock()
-	if p == nil || p.prev == nil || p.next == nil {
+	if p == nil || p.prev == nil || p.next == nil || p == bucket.head || p == bucket.tail {
 		return
 	}
 	p.prev.next = p.next
@@ -153,4 +153,23 @@ func (bucket *Bucket) getAll() []string {
 	}
 	bucket.lock.RUnlock()
 	return nodeList
+}
+
+// 检查bucket中的ip是否仍然在线
+func (bucket *Bucket) check() {
+	bucket.lock.RLock()
+	size := bucket.size
+	bucket.lock.RUnlock()
+	for i := 1; i <= size; i++ {
+		bucket.lock.RLock()
+		p := bucket.tail.prev
+		ipTo := p.ip
+		bucket.lock.RUnlock()
+		if !Ping(ipTo) {
+			bucket.delete(p)
+		} else {
+			bucket.shiftToHead(p)
+		}
+	}
+
 }

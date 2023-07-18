@@ -32,13 +32,13 @@ type Order struct {
 }
 
 // 初始化
-func (order *Order) init(ipTarget string) {
+func (order *Order) init(id *big.Int) {
 	order.head = new(orderUnit)
 	order.tail = new(orderUnit)
 	order.head.next, order.head.prev = order.tail, nil
 	order.tail.next, order.tail.prev = nil, order.head
 	order.size = 0
-	order.idTarget = getHash(ipTarget)
+	order.idTarget = new(big.Int).Set(id)
 }
 
 // 查找order中ip所在节点

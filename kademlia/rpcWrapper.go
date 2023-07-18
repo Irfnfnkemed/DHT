@@ -17,8 +17,8 @@ func (wrapper *RPCWrapper) Ping(_Null, _ *Null) error {
 	return errors.New("Offline node.")
 }
 
-func (wrapper *RPCWrapper) FindNode(pair IpPairs, findList *[]string) error {
-	list := wrapper.node.FindNode(pair.IpTo)
+func (wrapper *RPCWrapper) FindNode(pair IpIdPairs, findList *[]string) error {
+	list := wrapper.node.FindNode(pair.IdTo)
 	for _, ipFind := range list {
 		*findList = append(*findList, ipFind)
 	}
