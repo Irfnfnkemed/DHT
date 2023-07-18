@@ -48,7 +48,7 @@ func (data *Data) put(key, value string) {
 	data.dataLock.Lock()
 	data.dataPair[key] = value
 	data.republishTime[key] = time.Now().Add(10 * time.Second)
-	data.abandonTime[key] = time.Now().Add(15 * time.Second)
+	data.abandonTime[key] = time.Now().Add(25 * time.Second)
 	data.dataLock.Unlock()
 }
 
@@ -72,6 +72,6 @@ func (data *Data) flush(dataPair DataPair) {
 	data.dataLock.Lock()
 	data.dataPair[dataPair.Key] = dataPair.Value
 	data.republishTime[dataPair.Key] = time.Now().Add(10 * time.Second)
-	data.abandonTime[dataPair.Key] = time.Now().Add(15 * time.Second)
+	data.abandonTime[dataPair.Key] = time.Now().Add(25 * time.Second)
 	data.dataLock.Unlock()
 }

@@ -5,6 +5,7 @@ import (
 	"math/big"
 	"math/rand"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -21,14 +22,15 @@ type IpDataPairs struct {
 }
 
 type Node struct {
-	Online  bool
-	RPC     rpc.NodeRpc
-	IP      string
-	ID      *big.Int
-	buckets [160]Bucket
-	data    Data
-	start   chan bool
-	quit    chan bool
+	Online       bool
+	RPC          rpc.NodeRpc
+	IP           string
+	ID           *big.Int
+	buckets      [160]Bucket
+	refreshIndex int
+	data         Data
+	start        chan bool
+	quit         chan bool
 }
 
 // 整体初始化
@@ -45,6 +47,7 @@ func (node *Node) Init(ip string) error {
 	for i := range node.buckets {
 		node.buckets[i].init(node.IP)
 	}
+	node.refreshIndex = 0
 	node.data.Init()
 	node.start = make(chan bool, 1)
 	node.quit = make(chan bool, 1)
@@ -97,8 +100,8 @@ func (node *Node) FindNode(ip string) []string {
 }
 
 // 测试节点是否上线
-func Ping(ipFrom, ipTo string) bool {
-	err := rpc.RemoteCall(ipTo, "DHT.Ping", ipFrom, &Null{})
+func Ping(ipTo string) bool {
+	err := rpc.RemoteCall(ipTo, "DHT.Ping", Null{}, &Null{})
 	return err == nil
 }
 
@@ -136,13 +139,11 @@ func (node *Node) nodeLookup(ip string) []string {
 func (node *Node) findNodeList(order *Order, callList []*orderUnit, ipTarget string) []string {
 	findList := []string{}
 	for _, p := range callList {
+		p.done = true
 		err := rpc.RemoteCall(p.ip, "DHT.FindNode", IpPairs{node.IP, ipTarget}, &findList)
+		node.flush(p.ip, err == nil)
 		if err != nil {
 			logrus.Errorf("FindNode error, server IP = %s", p.ip)
-		}
-		node.flush(p.ip, err == nil)
-		p.done = true
-		if err != nil {
 			order.delete(p)
 		}
 	}
@@ -172,25 +173,6 @@ func (node *Node) Join(ip string) bool {
 	return true
 }
 
-func (node *Node) A() {
-
-	//("--------------------", node.IP, "----------------------------------")
-	size := 0
-	for i := 0; i < 160; i++ {
-		if node.buckets[i].size != 0 {
-			//fmt.Println(i, ":")
-			p := node.buckets[i].head.next
-			size += node.buckets[i].size
-			for p != node.buckets[i].tail {
-				//	fmt.Println(p.ip)
-				p = p.next
-			}
-		}
-	}
-	//fmt.Println(size)
-	logrus.Errorf("%d", size)
-}
-
 func (node *Node) Put(key string, value string) bool {
 	nodeList := node.nodeLookup(key)
 	flag := false
@@ -218,12 +200,17 @@ func (node *Node) PutIn(dataPair DataPair) {
 
 func (node *Node) republish() {
 	republishList := node.data.getRepublishList()
+	var wg sync.WaitGroup
+	wg.Add(len(republishList))
 	for _, dataPair := range republishList {
-		go node.republishData(dataPair)
+		go node.republishData(dataPair, &wg)
 	}
+	wg.Wait()
+	time.Sleep(500 * time.Millisecond)
+	logrus.Infof("Node (IP = %s) republishes the data.", node.IP)
 }
 
-func (node *Node) republishData(dataPair DataPair) {
+func (node *Node) republishData(dataPair DataPair, wg *sync.WaitGroup) {
 	nodeList := node.nodeLookup(dataPair.Key)
 	for _, ip := range nodeList {
 		if ip == node.IP {
@@ -236,6 +223,7 @@ func (node *Node) republishData(dataPair DataPair) {
 			node.flush(ip, err == nil)
 		}
 	}
+	wg.Done()
 }
 
 func (node *Node) FlushData(dataPair DataPair) {
@@ -277,14 +265,14 @@ func (node *Node) Get(key string) (bool, string) {
 	}
 	for {
 		callList := order.get()
-		findList, value := node.findValueList(callList, key)
+		findList, value := node.findValueList(&order, callList, key)
 		if value != "" {
 			return true, value
 		}
 		flag := order.flush(findList) //更新order
 		if !flag {
 			callList = order.getUndone()
-			findList, value = node.findValueList(callList, key)
+			findList, value = node.findValueList(&order, callList, key)
 			if value != "" {
 				return true, value
 			}
@@ -297,26 +285,23 @@ func (node *Node) Get(key string) (bool, string) {
 	return false, ""
 }
 
-func (node *Node) findValueList(callList []*orderUnit, key string) ([]string, string) {
-	findList := []string{}
-	value := ""
+func (node *Node) findValueList(order *Order, callList []*orderUnit, key string) (findList []string, value string) {
 	for _, p := range callList {
-		err := rpc.RemoteCall(p.ip, "DHT.Getout", IpPairs{node.IP, key}, &value)
-		if err != nil {
-			logrus.Errorf("findValueList error, server IP = %s", p.ip)
-		}
+		p.done = true
+		err := rpc.RemoteCall(p.ip, "DHT.FindNode", IpPairs{node.IP, key}, &findList)
 		node.flush(p.ip, err == nil)
 		if err != nil {
+			logrus.Errorf("FindNode error, server IP = %s", p.ip)
+			order.delete(p)
+			continue
+		}
+		err = rpc.RemoteCall(p.ip, "DHT.Getout", IpPairs{node.IP, key}, &value)
+		if err != nil {
+			logrus.Errorf("findValueList error, server IP = %s", p.ip)
 			continue
 		}
 		if value != "" {
 			return []string{}, value
-		}
-		p.done = true
-		err = rpc.RemoteCall(p.ip, "DHT.FindNode", IpPairs{node.IP, key}, &findList)
-		if err != nil {
-			logrus.Errorf("FindNode error, server IP = %s", p.ip)
-			continue
 		}
 	}
 	return findList, ""
@@ -337,5 +322,17 @@ func (node *Node) ForceQuit() {
 }
 
 func (node *Node) Quit() {
-	node.ForceQuit()
+	if !node.Online {
+		return
+	}
+	node.Online = false
+	close(node.quit)
+	node.republish()
+	logrus.Infof("Node (IP = %s, ID = %v) quits.", node.IP, node.ID)
 }
+
+// func (node *Node) refresh() {
+// 	if node.buckets[node.refreshIndex].getSize() <= 1 {
+//         node.nodeLookup()
+// 	}
+// }

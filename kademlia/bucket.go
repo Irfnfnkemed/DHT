@@ -60,7 +60,7 @@ func (bucket *Bucket) getSize() int {
 func (bucket *Bucket) shiftToHead(p *unit) {
 	bucket.lock.Lock()
 	defer bucket.lock.Unlock()
-	if p == bucket.head || p == bucket.tail {
+	if p == bucket.head || p == bucket.tail || p.prev == nil || p.next == nil {
 		return
 	}
 	p.prev.next = p.next
@@ -87,6 +87,9 @@ func (bucket *Bucket) find(ip string) *unit {
 func (bucket *Bucket) delete(p *unit) {
 	bucket.lock.Lock()
 	defer bucket.lock.Unlock()
+	if p == nil || p.prev == nil || p.next == nil {
+		return
+	}
 	p.prev.next = p.next
 	p.next.prev = p.prev
 	bucket.size--
@@ -114,7 +117,7 @@ func (bucket *Bucket) flush(ip string, online bool) {
 					p = bucket.tail.prev
 					ipTo := p.ip
 					bucket.lock.RUnlock()
-					if !Ping(bucket.ip, ipTo) {
+					if !Ping(ipTo) {
 						bucket.lock.Lock()
 						p.ip = ip //替换节点
 						bucket.lock.Unlock()

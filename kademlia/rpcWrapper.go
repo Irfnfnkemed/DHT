@@ -10,7 +10,7 @@ type RPCWrapper struct {
 	node *Node
 }
 
-func (wrapper *RPCWrapper) Ping(ipFrom string, _ *Null) error {
+func (wrapper *RPCWrapper) Ping(_Null, _ *Null) error {
 	if wrapper.node.Online {
 		return nil
 	}
@@ -47,12 +47,12 @@ func (wrapper *RPCWrapper) FlushData(pair IpDataPairs, _ *Null) error {
 func (wrapper *RPCWrapper) Getout(pair IpPairs, value *string) error {
 	ok := false
 	ok, *value = wrapper.node.Getout(pair.IpTo)
+	if pair.IpFrom != wrapper.node.IP {
+		wrapper.node.flush(pair.IpFrom, true)
+	}
 	if !ok {
 		logrus.Errorf("Getting out error, IP = %s.", wrapper.node.IP)
 		return errors.New("Fail to get out data.")
-	}
-	if pair.IpFrom != wrapper.node.IP {
-		wrapper.node.flush(pair.IpFrom, true)
 	}
 	return nil
 }
