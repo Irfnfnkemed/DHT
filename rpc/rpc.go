@@ -15,8 +15,8 @@ var clientPoolLock sync.RWMutex
 type NodeRpc struct {
 	server   *rpc.Server
 	listener net.Listener
-	clients  chan *rpc.Client //容量为20，容纳可用客户端
-	conns    chan net.Conn    //容量为40，容纳Dial()、Accept()产生的连接，在停止服务时关闭
+	clients  chan *rpc.Client //容量为50，容纳可用客户端
+	conns    chan net.Conn    //容量为100，容纳Dial()、Accept()产生的连接，在停止服务时关闭
 }
 
 type Null struct{}
@@ -86,9 +86,9 @@ func (nodeRpc *NodeRpc) Serve(ip, serveName string, start, quit chan bool, regis
 
 // 创建一个节点的用户池
 func (nodeRpc *NodeRpc) createClient(ip string) error {
-	nodeRpc.clients = make(chan *rpc.Client, 20)
-	nodeRpc.conns = make(chan net.Conn, 40)
-	for i := 0; i < 20; i++ {
+	nodeRpc.clients = make(chan *rpc.Client, 50)
+	nodeRpc.conns = make(chan net.Conn, 100)
+	for i := 0; i < 50; i++ {
 		conn, err := net.DialTimeout("tcp", ip, time.Second)
 		if err != nil {
 			logrus.Errorf("Dialing error (server IP = %s): %v.", ip, err)

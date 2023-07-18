@@ -19,9 +19,7 @@ func (wrapper *RPCWrapper) Ping(_Null, _ *Null) error {
 
 func (wrapper *RPCWrapper) FindNode(pair IpIdPairs, findList *[]string) error {
 	list := wrapper.node.FindNode(pair.IdTo)
-	for _, ipFind := range list {
-		*findList = append(*findList, ipFind)
-	}
+	*findList = list
 	if pair.IpFrom != wrapper.node.IP {
 		wrapper.node.flush(pair.IpFrom, true)
 	}

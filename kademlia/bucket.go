@@ -155,21 +155,18 @@ func (bucket *Bucket) getAll() []string {
 	return nodeList
 }
 
-// 检查bucket中的ip是否仍然在线
+// 检查bucket中的尾部ip是否仍然在线
 func (bucket *Bucket) check() {
 	bucket.lock.RLock()
-	size := bucket.size
+	p := bucket.tail.prev
+	ipTo := p.ip
 	bucket.lock.RUnlock()
-	for i := 1; i <= size; i++ {
-		bucket.lock.RLock()
-		p := bucket.tail.prev
-		ipTo := p.ip
-		bucket.lock.RUnlock()
-		if !Ping(ipTo) {
-			bucket.delete(p)
-		} else {
-			bucket.shiftToHead(p)
-		}
+	if ipTo == "" {
+		return
 	}
-
+	if !Ping(ipTo) {
+		bucket.delete(p)
+	} else {
+		bucket.shiftToHead(p)
+	}
 }

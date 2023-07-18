@@ -13,6 +13,9 @@ import (
 
 const k = 16 //bucket的大小
 const a = 3  //NodeLookup中的alpha大小
+const RepulishCircleTime = 4 * time.Second
+const AbandonCircleTime = 15 * time.Second
+const RefreshCircleTime = 250 * time.Millisecond
 
 type Null struct{}
 
@@ -99,21 +102,27 @@ func (node *Node) Join(ip string) bool {
 func (node *Node) Put(key string, value string) bool {
 	nodeList := node.nodeLookup(getHash(key))
 	flag := false
+	var wg sync.WaitGroup
+	wg.Add(len(nodeList))
 	for _, ip := range nodeList {
-		if node.IP == ip {
-			node.data.put(key, value)
-			flag = true
-		} else {
-			err := rpc.RemoteCall(ip, "DHT.PutIn", IpDataPairs{node.IP, DataPair{key, value}}, &Null{})
-			if err != nil {
-				logrus.Errorf("Putting in error, IP = %s: %v", ip, err)
-			}
-			node.flush(ip, err == nil)
-			if err == nil {
+		go func(ip string) {
+			defer wg.Done()
+			if node.IP == ip {
+				node.data.put(key, value)
 				flag = true
+			} else {
+				err := rpc.RemoteCall(ip, "DHT.PutIn", IpDataPairs{node.IP, DataPair{key, value}}, &Null{})
+				if err != nil {
+					logrus.Errorf("Putting in error, IP = %s: %v", ip, err)
+				}
+				node.flush(ip, err == nil)
+				if err == nil {
+					flag = true
+				}
 			}
-		}
+		}(ip)
 	}
+	wg.Wait()
 	return flag
 }
 
@@ -175,6 +184,9 @@ func (node *Node) ForceQuit() {
 
 // 测试节点是否上线
 func Ping(ipTo string) bool {
+	if ipTo == "" {
+		return false
+	}
 	err := rpc.RemoteCall(ipTo, "DHT.Ping", Null{}, &Null{})
 	return err == nil
 }
@@ -253,15 +265,27 @@ func (node *Node) nodeLookup(id *big.Int) []string {
 // 给出可能的最近k个的目标的候补列表（用于NodeLookup）
 func (node *Node) findNodeList(order *Order, callList []*orderUnit, idTarget *big.Int) []string {
 	findList := []string{}
+	var lock sync.Mutex
+	var wg sync.WaitGroup
+	wg.Add(len(callList))
 	for _, p := range callList {
-		p.done = true
-		err := rpc.RemoteCall(p.ip, "DHT.FindNode", IpIdPairs{node.IP, idTarget}, &findList)
-		node.flush(p.ip, err == nil)
-		if err != nil {
-			logrus.Errorf("FindNode error, server IP = %s", p.ip)
-			order.delete(p)
-		}
+		go func(q *orderUnit) {
+			subFindList := []string{}
+			defer wg.Done()
+			q.done = true
+			err := rpc.RemoteCall(q.ip, "DHT.FindNode", IpIdPairs{node.IP, idTarget}, &subFindList)
+			node.flush(q.ip, err == nil)
+			if err != nil {
+				logrus.Errorf("FindNode error, server IP = %s", q.ip)
+				order.delete(q)
+				return
+			}
+			lock.Lock()
+			findList = append(findList, subFindList...)
+			lock.Unlock()
+		}(p)
 	}
+	wg.Wait()
 	return findList
 }
 
@@ -274,24 +298,30 @@ func (node *Node) republish() {
 		go node.republishData(dataPair, &wg)
 	}
 	wg.Wait()
-	time.Sleep(500 * time.Millisecond)
+	time.Sleep(750 * time.Millisecond)
 	logrus.Infof("Node (IP = %s) republishes the data.", node.IP)
 }
 
 // 发布一条数据
 func (node *Node) republishData(dataPair DataPair, wg *sync.WaitGroup) {
 	nodeList := node.nodeLookup(getHash(dataPair.Key))
+	var wgPut sync.WaitGroup
+	wgPut.Add(len(nodeList))
 	for _, ip := range nodeList {
-		if ip == node.IP {
-			node.PutIn(dataPair)
-		} else {
-			err := rpc.RemoteCall(ip, "DHT.PutIn", IpDataPairs{node.IP, dataPair}, &Null{})
-			if err != nil {
-				logrus.Errorf("Republishing error, IP = %s: %v", ip, err)
+		go func(ip string) {
+			defer wgPut.Done()
+			if ip == node.IP {
+				node.PutIn(dataPair)
+			} else {
+				err := rpc.RemoteCall(ip, "DHT.PutIn", IpDataPairs{node.IP, dataPair}, &Null{})
+				if err != nil {
+					logrus.Errorf("Republishing error, IP = %s: %v", ip, err)
+				}
+				node.flush(ip, err == nil)
 			}
-			node.flush(ip, err == nil)
-		}
+		}(ip)
 	}
+	wgPut.Wait()
 	wg.Done()
 }
 
@@ -309,8 +339,9 @@ func (node *Node) Getout(key string) (bool, string) {
 // 给出可能的最近k个的目标的候补列表，若找到数据值，直接结束（用于Get）
 func (node *Node) findValueList(order *Order, callList []*orderUnit, key string) (findList []string, value string) {
 	for _, p := range callList {
+		subFindList := []string{}
 		p.done = true
-		err := rpc.RemoteCall(p.ip, "DHT.FindNode", IpIdPairs{node.IP, getHash(key)}, &findList)
+		err := rpc.RemoteCall(p.ip, "DHT.FindNode", IpIdPairs{node.IP, getHash(key)}, &subFindList)
 		node.flush(p.ip, err == nil)
 		if err != nil {
 			logrus.Errorf("FindNode error, server IP = %s", p.ip)
@@ -325,6 +356,7 @@ func (node *Node) findValueList(order *Order, callList []*orderUnit, key string)
 		if value != "" {
 			return []string{}, value
 		}
+		findList = append(findList, subFindList...)
 	}
 	return findList, ""
 }
@@ -337,9 +369,10 @@ func (node *Node) abandon() {
 // 定期检查bucket，尽量使得bucket不要为空
 func (node *Node) refresh() {
 	node.buckets[node.refreshIndex].check()
-	if node.buckets[node.refreshIndex].getSize() < 4 {
+	if node.buckets[node.refreshIndex].getSize() < 2 {
 		node.nodeLookup(exp[node.refreshIndex])
 	}
+	logrus.Infof("Node (IP = %s) refreshes the bucket %d.", node.IP, node.refreshIndex)
 	node.refreshIndex = (node.refreshIndex + 1) % 160
 }
 
@@ -348,21 +381,21 @@ func (node *Node) maintain() {
 	go func() {
 		for node.Online {
 			node.republish()
-			time.Sleep(8 * time.Second)
+			time.Sleep(RepulishCircleTime)
 		}
 		logrus.Infof("Node (IP = %s) stops republishing.", node.IP)
 	}()
 	go func() {
 		for node.Online {
 			node.abandon()
-			time.Sleep(15 * time.Second)
+			time.Sleep(AbandonCircleTime)
 		}
 		logrus.Infof("Node (IP = %s) stops abandoning.", node.IP)
 	}()
 	go func() {
 		for node.Online {
 			node.refresh()
-			time.Sleep(10 * time.Second)
+			time.Sleep(RefreshCircleTime)
 		}
 		logrus.Infof("Node (IP = %s) stops refreshing.", node.IP)
 	}()
