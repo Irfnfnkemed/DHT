@@ -36,9 +36,21 @@
 └── main.go
 ```
 
+## 相关内容 
+
 [项目综述与要求](doc/DHT.md)
 
 * [环境配置](doc/env-setup.md)
 * [学习材料](doc/tutorial.md)
 
 [报告](doc/report.md)
+
+
+
+## 测试方式：
+输入
+```bash
+go build
+./dht -protocol PROTOCOL_NAME -test TEST_PART 
+```
+其中，`PROTOCOL_NAME`为`naive`/`chord`/`kademlia`，`TEST_PART`为`basic`/`advance`/`all`。
