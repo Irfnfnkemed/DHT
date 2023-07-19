@@ -1,8 +1,10 @@
 package test
 
 import (
-	//"dht/naive"
 	"dht/chord"
+	"dht/kademlia"
+	"dht/naive"
+	"errors"
 )
 
 /*
@@ -11,16 +13,32 @@ import (
  * You can use the "naive.Node" struct as a reference to implement your own struct.
  */
 
-// func NewNode(port int) dhtNode {
-// 	// Todo: create a node and then return it.
-// 	node := new(naive.Node)
-// 	node.Init(portToAddr(localAddress, port))
-// 	return node
-// }
+var Protocol string
+
+func SetProtocol(protocol string) error {
+	if protocol != "naive" && protocol != "chord" && protocol != "kademlia" {
+		return errors.New("Protocol name false.")
+	} else {
+		Protocol = protocol
+		return nil
+	}
+}
 
 func NewNode(port int) dhtNode {
 	// Todo: create a node and then return it.
-	node := new(chord.Node)
-	node.Init(portToAddr(localAddress, port))
-	return node
+	switch Protocol {
+	case "naive":
+		node := new(naive.Node)
+		node.Init(portToAddr(localAddress, port))
+		return node
+	case "chord":
+		node := new(chord.Node)
+		node.Init(portToAddr(localAddress, port))
+		return node
+	case "kademlia":
+		node := new(kademlia.Node)
+		node.Init(portToAddr(localAddress, port))
+		return node
+	}
+	return nil
 }

@@ -1,6 +1,6 @@
 package main
 
-import test "dht/test"
+import "dht/test"
 
 func main() {
 	test.Test()
