@@ -54,3 +54,4 @@ go build
 ./dht -protocol PROTOCOL_NAME -test TEST_PART 
 ```
 其中，`PROTOCOL_NAME`为`naive`/`chord`/`kademlia`，`TEST_PART`为`basic`/`advance`/`all`。
+例如 `./dht -protocol kademlia -test all`
