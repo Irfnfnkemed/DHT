@@ -3,8 +3,6 @@ package kademlia
 import (
 	"errors"
 	"sync"
-
-	"github.com/sirupsen/logrus"
 )
 
 // bucket内部的链表节点
@@ -139,7 +137,6 @@ func (bucket *Bucket) flush(ip string, online bool) {
 			bucket.delete(p)
 		}
 	}
-	logrus.Infof("Node (IP = %s) flushed the k-bucket.", bucket.ip)
 }
 
 // 给出bucket中所有的ip

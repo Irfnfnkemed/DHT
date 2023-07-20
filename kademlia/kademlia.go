@@ -372,7 +372,6 @@ func (node *Node) refresh() {
 	if node.buckets[node.refreshIndex].getSize() < 2 {
 		node.nodeLookup(exp[node.refreshIndex])
 	}
-	logrus.Infof("Node (IP = %s) refreshes the bucket %d.", node.IP, node.refreshIndex)
 	node.refreshIndex = (node.refreshIndex + 1) % 160
 }
 
