@@ -59,7 +59,7 @@ func (node *Node) Init(ip string) error {
 	node.IP = ip
 	node.ID = getHash(ip)
 	for i := range node.buckets {
-		node.buckets[i].init(node.IP)
+		node.buckets[i].init(node.IP, node)
 	}
 	node.refreshIndex = 0
 	node.data.Init()
@@ -111,7 +111,7 @@ func (node *Node) Put(key string, value string) bool {
 				node.data.put(key, value)
 				flag = true
 			} else {
-				err := rpc.RemoteCall(ip, "DHT.PutIn", IpDataPairs{node.IP, DataPair{key, value}}, &Null{})
+				err := node.RPC.RemoteCall(ip, "DHT.PutIn", IpDataPairs{node.IP, DataPair{key, value}}, &Null{})
 				if err != nil {
 					logrus.Errorf("Putting in error, IP = %s: %v", ip, err)
 				}
@@ -183,11 +183,11 @@ func (node *Node) ForceQuit() {
 }
 
 // 测试节点是否上线
-func Ping(ipTo string) bool {
+func (node *Node) Ping(ipTo string) bool {
 	if ipTo == "" {
 		return false
 	}
-	err := rpc.RemoteCall(ipTo, "DHT.Ping", Null{}, &Null{})
+	err := node.RPC.RemoteCall(ipTo, "DHT.Ping", Null{}, &Null{})
 	return err == nil
 }
 
@@ -273,7 +273,7 @@ func (node *Node) findNodeList(order *Order, callList []*orderUnit, idTarget *bi
 			subFindList := []string{}
 			defer wg.Done()
 			q.done = true
-			err := rpc.RemoteCall(q.ip, "DHT.FindNode", IpIdPairs{node.IP, idTarget}, &subFindList)
+			err := node.RPC.RemoteCall(q.ip, "DHT.FindNode", IpIdPairs{node.IP, idTarget}, &subFindList)
 			node.flush(q.ip, err == nil)
 			if err != nil {
 				logrus.Errorf("FindNode error, server IP = %s", q.ip)
@@ -313,7 +313,7 @@ func (node *Node) republishData(dataPair DataPair, wg *sync.WaitGroup) {
 			if ip == node.IP {
 				node.PutIn(dataPair)
 			} else {
-				err := rpc.RemoteCall(ip, "DHT.PutIn", IpDataPairs{node.IP, dataPair}, &Null{})
+				err := node.RPC.RemoteCall(ip, "DHT.PutIn", IpDataPairs{node.IP, dataPair}, &Null{})
 				if err != nil {
 					logrus.Errorf("Republishing error, IP = %s: %v", ip, err)
 				}
@@ -341,14 +341,14 @@ func (node *Node) findValueList(order *Order, callList []*orderUnit, key string)
 	for _, p := range callList {
 		subFindList := []string{}
 		p.done = true
-		err := rpc.RemoteCall(p.ip, "DHT.FindNode", IpIdPairs{node.IP, getHash(key)}, &subFindList)
+		err := node.RPC.RemoteCall(p.ip, "DHT.FindNode", IpIdPairs{node.IP, getHash(key)}, &subFindList)
 		node.flush(p.ip, err == nil)
 		if err != nil {
 			logrus.Errorf("FindNode error, server IP = %s", p.ip)
 			order.delete(p)
 			continue
 		}
-		err = rpc.RemoteCall(p.ip, "DHT.Getout", IpPairs{node.IP, key}, &value)
+		err = node.RPC.RemoteCall(p.ip, "DHT.Getout", IpPairs{node.IP, key}, &value)
 		if err != nil {
 			logrus.Errorf("findValueList error, server IP = %s", p.ip)
 			continue

@@ -14,6 +14,7 @@ type unit struct {
 
 // 每个bucket都是一个链表
 type Bucket struct {
+	node *Node
 	head *unit
 	tail *unit
 	lock sync.RWMutex
@@ -22,7 +23,8 @@ type Bucket struct {
 }
 
 // 初始化
-func (bucket *Bucket) init(ip string) error {
+func (bucket *Bucket) init(ip string, node *Node) error {
+	bucket.node = node
 	bucket.lock.Lock()
 	bucket.head = new(unit)
 	bucket.tail = new(unit)
@@ -119,7 +121,7 @@ func (bucket *Bucket) flush(ip string, online bool) {
 					p = bucket.tail.prev
 					ipTo := p.ip
 					bucket.lock.RUnlock()
-					if !Ping(ipTo) {
+					if !bucket.node.Ping(ipTo) {
 						bucket.lock.Lock()
 						p.ip = ip //替换节点
 						bucket.lock.Unlock()
@@ -161,7 +163,7 @@ func (bucket *Bucket) check() {
 	if ipTo == "" {
 		return
 	}
-	if !Ping(ipTo) {
+	if !bucket.node.Ping(ipTo) {
 		bucket.delete(p)
 	} else {
 		bucket.shiftToHead(p)
