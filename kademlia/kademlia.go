@@ -13,9 +13,9 @@ import (
 
 const k = 16 //bucket的大小
 const a = 3  //NodeLookup中的alpha大小
-const RepulishCircleTime = 4 * time.Second
-const AbandonCircleTime = 15 * time.Second
-const RefreshCircleTime = 250 * time.Millisecond
+const RepulishCircleTime = 50 * time.Second
+const AbandonCircleTime = 200 * time.Second
+const RefreshCircleTime = time.Second
 const LookupTimeOut = 5 * time.Second
 const RepulishTimeOut = 15 * time.Second
 const FindNodeTimeOut = 1 * time.Second
@@ -260,7 +260,6 @@ func (node *Node) nodeLookup(id *big.Int) (findList []string) {
 	order := Order{}
 	order.init(id)
 	done := make(chan bool, 1)
-	logrus.Errorf("ppppppppppppppppppppp%s", node.IP)
 	go func() {
 		list := node.FindNode(id)
 		for _, ipFind := range list {

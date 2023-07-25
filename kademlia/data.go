@@ -17,8 +17,8 @@ type Data struct {
 	abandonTime   map[string]time.Time //舍弃时间
 }
 
-const RepublishTime = 15 * time.Second
-const AbandonTime = 40 * time.Second
+const RepublishTime = 60 * time.Second
+const AbandonTime = 240 * time.Second
 
 // 初始化
 func (data *Data) Init() {
