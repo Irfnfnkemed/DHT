@@ -6,8 +6,6 @@ import (
 	"net/rpc"
 	"sync"
 	"time"
-
-	"github.com/sirupsen/logrus"
 )
 
 type NodeRpc struct {
@@ -28,14 +26,14 @@ const PendClientTimeOut = 500 * time.Millisecond
 
 // 远端调用
 func (nodeRpc *NodeRpc) RemoteCall(ip string, serviceMethod string, args interface{}, reply interface{}) error {
-	logrus.Infof("Remote call (server IP = %s, serviceMethod = %s).", ip, serviceMethod)
+	//logrus.Infof("Remote call (server IP = %s, serviceMethod = %s).", ip, serviceMethod)
 	if !nodeRpc.listening {
 		return errors.New("Offline node server (IP = " + ip + ").")
 	}
 	client, err := nodeRpc.getClient(ip)
 	defer nodeRpc.returnClient(ip, client)
 	if err != nil {
-		logrus.Errorf("Getting client error (server IP = %s): %v.", ip, err)
+		//logrus.Errorf("Getting client error (server IP = %s): %v.", ip, err)
 		if client != nil {
 			client.Close()
 			client = nil
@@ -49,10 +47,10 @@ func (nodeRpc *NodeRpc) RemoteCall(ip string, serviceMethod string, args interfa
 	select {
 	case err := <-done:
 		if err != nil {
-			logrus.Errorf("Calling error (server IP = %s): %v.", ip, err)
+			//logrus.Errorf("Calling error (server IP = %s): %v.", ip, err)
 			return err
 		} else {
-			logrus.Infof("Call done (server IP = %s, serviceMethod = %s).", ip, serviceMethod)
+			//logrus.Infof("Call done (server IP = %s, serviceMethod = %s).", ip, serviceMethod)
 			return nil
 		}
 	case <-time.After(CallTimeOut):
@@ -77,25 +75,25 @@ func (nodeRpc *NodeRpc) Serve(ip, serveName string, start, quit chan bool, regis
 	nodeRpc.connLock.Unlock()
 	err = nodeRpc.server.RegisterName(serveName, registerNode) // registerNode是需要注册的节点的指针
 	if err != nil {
-		logrus.Errorf("Registing error (server IP = %s): %v.", ip, err)
+		//logrus.Errorf("Registing error (server IP = %s): %v.", ip, err)
 		return err
 	} else {
-		logrus.Infof("Regist done (server IP = %s, name = %s).", ip, serveName)
+		//logrus.Infof("Regist done (server IP = %s, name = %s).", ip, serveName)
 	}
 	if !nodeRpc.listening {
 		nodeRpc.listener, err = net.Listen("tcp", ip)
 		if err != nil {
-			logrus.Errorf("Listening error (server IP = %s): %v.", ip, err)
+			//logrus.Errorf("Listening error (server IP = %s): %v.", ip, err)
 			return err
 		} else {
 			nodeRpc.listening = true
-			logrus.Infof("Listen done (server IP = %s, network = tcp).", ip)
+			//logrus.Infof("Listen done (server IP = %s, network = tcp).", ip)
 		}
 		go func() {
 			for nodeRpc.listening {
 				err := nodeRpc.AcceptAndServe()
 				if err != nil {
-					logrus.Errorf("Accepting error (server IP = %s): %v.", ip, err)
+					//logrus.Errorf("Accepting error (server IP = %s): %v.", ip, err)
 				}
 			}
 		}()
@@ -107,7 +105,7 @@ func (nodeRpc *NodeRpc) Serve(ip, serveName string, start, quit chan bool, regis
 		nodeRpc.listener.Close()
 		nodeRpc.closeConn() //结束服务
 	}
-	logrus.Infof("Node stops serving (server IP = %s).", ip)
+	//logrus.Infof("Node stops serving (server IP = %s).", ip)
 	return nil
 }
 
@@ -120,13 +118,13 @@ func (nodeRpc *NodeRpc) createClient(ip string) error {
 	for i := 0; i < 10; i++ {
 		conn, err := net.DialTimeout("tcp", ip, time.Second)
 		if err != nil {
-			logrus.Errorf("Dialing error (server IP = %s): %v.", ip, err)
+			//logrus.Errorf("Dialing error (server IP = %s): %v.", ip, err)
 			break
 		}
 		client := rpc.NewClient(conn)
 		err = nodeRpc.connect(ip, client)
 		if err != nil {
-			logrus.Errorf("Connecting error (server IP = %s): %v.", ip, err)
+			//logrus.Errorf("Connecting error (server IP = %s): %v.", ip, err)
 			break
 		}
 		flag = true
@@ -135,7 +133,7 @@ func (nodeRpc *NodeRpc) createClient(ip string) error {
 		nodeRpc.connLock.Unlock()
 	}
 	if flag {
-		logrus.Infof("Create 20 clients (server IP = %s).", ip)
+		//logrus.Infof("Create 20 clients (server IP = %s).", ip)
 	} else {
 		nodeRpc.deleteClients(ip)
 		return errors.New("Creating clients error.")
@@ -151,7 +149,7 @@ func (nodeRpc *NodeRpc) getClient(ip string) (*rpc.Client, error) {
 	if !ok {
 		err := nodeRpc.createClient(ip)
 		if err != nil {
-			logrus.Errorf("Create clients error (server IP = %s): %v", ip, err)
+			//logrus.Errorf("Create clients error (server IP = %s): %v", ip, err)
 			return nil, err
 		}
 		nodeRpc.clientLock.RLock()
@@ -259,7 +257,7 @@ func (nodeRpc *NodeRpc) connect(ip string, client *rpc.Client) error {
 func (nodeRpc *NodeRpc) AcceptAndServe() error {
 	conn, err := nodeRpc.listener.Accept()
 	if err != nil {
-		logrus.Errorf("Building connection error: %v", err)
+		//logrus.Errorf("Building connection error: %v", err)
 		return err
 	}
 	go nodeRpc.server.ServeConn(conn) //开始服务
@@ -293,7 +291,7 @@ func (nodeRpc *NodeRpc) deleteClients(ip string) {
 // 	"net/rpc"
 // 	"time"
 
-// 	"github.com/sirupsen/logrus"
+// 	"github.com/sirupsen///logrus"
 // )
 
 // type NodeRpc struct {
@@ -308,25 +306,25 @@ func (nodeRpc *NodeRpc) deleteClients(ip string) {
 // 	nodeRpc.server = rpc.NewServer()
 // 	err = nodeRpc.server.RegisterName(serveName, registerNode) // registerNode是需要注册的节点的指针
 // 	if err != nil {
-// 		logrus.Errorf("Registing error (server IP = %s): %v.", ip, err)
+// 		//logrus.Errorf("Registing error (server IP = %s): %v.", ip, err)
 // 		return err
 // 	} else {
-// 		logrus.Infof("Regist done (server IP = %s, name = %s).", ip, serveName)
+// 		//logrus.Infof("Regist done (server IP = %s, name = %s).", ip, serveName)
 // 	}
 // 	if !nodeRpc.listening {
 // 		nodeRpc.listener, err = net.Listen("tcp", ip)
 // 		if err != nil {
-// 			logrus.Errorf("Listening error (server IP = %s): %v.", ip, err)
+// 			//logrus.Errorf("Listening error (server IP = %s): %v.", ip, err)
 // 			return err
 // 		} else {
 // 			nodeRpc.listening = true
-// 			logrus.Infof("Listen done (server IP = %s, network = tcp).", ip)
+// 			//logrus.Infof("Listen done (server IP = %s, network = tcp).", ip)
 // 		}
 // 		go func() {
 // 			for nodeRpc.listening {
 // 				err := nodeRpc.AcceptAndServe()
 // 				if err != nil {
-// 					logrus.Errorf("Accepting error (server IP = %s): %v.", ip, err)
+// 					//logrus.Errorf("Accepting error (server IP = %s): %v.", ip, err)
 // 				}
 // 			}
 // 		}()
@@ -337,14 +335,14 @@ func (nodeRpc *NodeRpc) deleteClients(ip string) {
 // 		nodeRpc.listening = false
 // 		nodeRpc.listener.Close()
 // 	}
-// 	logrus.Infof("Node stops serving (server IP = %s).", ip)
+// 	//logrus.Infof("Node stops serving (server IP = %s).", ip)
 // 	return nil
 // }
 
 // func (nodeRpc *NodeRpc) AcceptAndServe() error {
 // 	conn, err := nodeRpc.listener.Accept()
 // 	if err != nil {
-// 		logrus.Errorf("Building connection error: %v", err)
+// 		//logrus.Errorf("Building connection error: %v", err)
 // 		return err
 // 	}
 // 	go nodeRpc.server.ServeConn(conn) //开始服务
@@ -353,13 +351,13 @@ func (nodeRpc *NodeRpc) deleteClients(ip string) {
 
 // // 远端调用
 // func (nodeRpc *NodeRpc) RemoteCall(ip string, serviceMethod string, args interface{}, reply interface{}) error {
-// 	logrus.Infof("Remote call (server IP = %s, serviceMethod = %s).", ip, serviceMethod)
+// 	//logrus.Infof("Remote call (server IP = %s, serviceMethod = %s).", ip, serviceMethod)
 // 	if !nodeRpc.listening {
 // 		return errors.New("Offline node server (IP = " + ip + ").")
 // 	}
 // 	conn, err := net.DialTimeout("tcp", ip, time.Second)
 // 	if err != nil {
-// 		logrus.Errorf("Dial error (server IP = %s): %v.", ip, err)
+// 		//logrus.Errorf("Dial error (server IP = %s): %v.", ip, err)
 // 		return err
 // 	}
 // 	client := rpc.NewClient(conn)
