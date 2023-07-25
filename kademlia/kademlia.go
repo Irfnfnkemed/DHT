@@ -16,6 +16,9 @@ const a = 3  //NodeLookup中的alpha大小
 const RepulishCircleTime = 4 * time.Second
 const AbandonCircleTime = 15 * time.Second
 const RefreshCircleTime = 250 * time.Millisecond
+const LookupTimeOut = 5 * time.Second
+const RepulishTimeOut = 15 * time.Second
+const FindNodeTimeOut = 1 * time.Second
 
 type Null struct{}
 
@@ -166,9 +169,9 @@ func (node *Node) Quit() {
 	if !node.Online {
 		return
 	}
+	node.republish(node.data.getAllList())
 	node.Online = false
 	close(node.quit)
-	node.republish()
 	logrus.Infof("Node (IP = %s, ID = %v) quits.", node.IP, node.ID)
 }
 
@@ -200,66 +203,93 @@ func (node *Node) flush(ip string, online bool) {
 }
 
 // 找到节点已知的距离目标最近的k个节点ip
-func (node *Node) FindNode(id *big.Int) []string {
-	i := belong(node.ID, id)
-	nodeList := []string{}
-	if i == -1 {
-		nodeList = append(nodeList, node.IP) //自身是最近的
-	} else {
-		tmpList := node.buckets[i].getAll()
-		for _, ipNode := range tmpList {
-			nodeList = append(nodeList, ipNode)
+func (node *Node) FindNode(id *big.Int) (nodeList []string) {
+	done := make(chan bool, 1)
+	go func() {
+		i := belong(node.ID, id)
+		if i == -1 {
+			nodeList = append(nodeList, node.IP) //自身是最近的
+		} else {
+			tmpList := node.buckets[i].getAll()
+			for _, ipNode := range tmpList {
+				nodeList = append(nodeList, ipNode)
+			}
 		}
-	}
-	if len(nodeList) == k {
+		if len(nodeList) == k {
+			done <- true
+			return
+		}
+		for j := i - 1; j >= 0; j-- { //从较小的桶里补充
+			tmpList := node.buckets[j].getAll()
+			for _, ipNode := range tmpList {
+				nodeList = append(nodeList, ipNode)
+				if len(nodeList) == k {
+					done <- true
+					return
+				}
+			}
+		}
+		for j := i + 1; j < 160; j++ { //从较大的桶里补充
+			tmpList := node.buckets[j].getAll()
+			for _, ipNode := range tmpList {
+				nodeList = append(nodeList, ipNode)
+				if len(nodeList) == k {
+					done <- true
+					return
+				}
+			}
+		}
+		if i != -1 {
+			nodeList = append(nodeList, node.IP)
+		}
+		done <- true
+		return
+	}()
+	select {
+	case <-done:
+		return nodeList
+	case <-time.After(FindNodeTimeOut):
+		logrus.Errorf("Time out: func findNode, IP = %s.", node.IP)
 		return nodeList
 	}
-	for j := i - 1; j >= 0; j-- { //从较小的桶里补充
-		tmpList := node.buckets[j].getAll()
-		for _, ipNode := range tmpList {
-			nodeList = append(nodeList, ipNode)
-			if len(nodeList) == k {
-				return nodeList
-			}
-		}
-	}
-	for j := i + 1; j < 160; j++ { //从较大的桶里补充
-		tmpList := node.buckets[j].getAll()
-		for _, ipNode := range tmpList {
-			nodeList = append(nodeList, ipNode)
-			if len(nodeList) == k {
-				return nodeList
-			}
-		}
-	}
-	if i != -1 {
-		nodeList = append(nodeList, node.IP)
-	}
-	return nodeList
+
 }
 
 // 找到系统中距离目标最近的k个节点ip
-func (node *Node) nodeLookup(id *big.Int) []string {
+func (node *Node) nodeLookup(id *big.Int) (findList []string) {
 	order := Order{}
 	order.init(id)
-	list := node.FindNode(id)
-	for _, ipFind := range list {
-		order.insert(ipFind)
-	}
-	for {
-		callList := order.getUndoneAlpha()
-		findList := node.findNodeList(&order, callList, id)
-		flag := order.flush(findList) //更新order
-		if !flag {
-			callList = order.getUndoneAll()
-			findList = node.findNodeList(&order, callList, id)
-			flag = order.flush(findList) //更新order
+	done := make(chan bool, 1)
+	logrus.Errorf("ppppppppppppppppppppp%s", node.IP)
+	go func() {
+		list := node.FindNode(id)
+		for _, ipFind := range list {
+			order.insert(ipFind)
 		}
-		if !flag {
-			break
+		for {
+			callList := order.getUndoneAlpha()
+			findList := node.findNodeList(&order, callList, id)
+			flag := order.flush(findList) //更新order
+			if !flag {
+				callList = order.getUndoneAll()
+				findList = node.findNodeList(&order, callList, id)
+				flag = order.flush(findList) //更新order
+			}
+			if !flag {
+				break
+			}
 		}
+		done <- true
+		return
+	}()
+	select {
+	case <-done:
+		return order.getClosest()
+	case <-time.After(LookupTimeOut):
+		logrus.Errorf("Time out: func nodeLookup, IP = %s", node.IP)
+		return order.getClosest()
 	}
-	return order.getClosest()
+
 }
 
 // 给出可能的最近k个的目标的候补列表（用于NodeLookup）
@@ -290,16 +320,26 @@ func (node *Node) findNodeList(order *Order, callList []*orderUnit, idTarget *bi
 }
 
 // 重新发布一个节点的数据
-func (node *Node) republish() {
-	republishList := node.data.getRepublishList()
-	var wg sync.WaitGroup
-	wg.Add(len(republishList))
-	for _, dataPair := range republishList {
-		go node.republishData(dataPair, &wg)
+func (node *Node) republish(republishList []DataPair) {
+	done := make(chan bool, 1)
+	go func() {
+		var wg sync.WaitGroup
+		wg.Add(len(republishList))
+		for _, dataPair := range republishList {
+			go node.republishData(dataPair, &wg)
+		}
+		wg.Wait()
+		done <- true
+		return
+	}()
+	select {
+	case <-done:
+		logrus.Infof("Node (IP = %s) republishes the data.", node.IP)
+		return
+	case <-time.After(RepulishTimeOut):
+		logrus.Errorf("Time out: func republish, IP = %s", node.IP)
+		return
 	}
-	wg.Wait()
-	time.Sleep(750 * time.Millisecond)
-	logrus.Infof("Node (IP = %s) republishes the data.", node.IP)
 }
 
 // 发布一条数据
@@ -379,7 +419,7 @@ func (node *Node) refresh() {
 func (node *Node) maintain() {
 	go func() {
 		for node.Online {
-			node.republish()
+			node.republish(node.data.getRepublishList())
 			time.Sleep(RepulishCircleTime)
 		}
 		logrus.Infof("Node (IP = %s) stops republishing.", node.IP)

@@ -238,10 +238,9 @@ func (node *Node) Get(key string) (ok bool, value string) {
 			logrus.Errorf("Node (IP = %s) getting out data error (key = %s, value = %s): %v.", node.IP, key, value, err)
 			return false, ""
 		}
-		ok = true
 	}
 	logrus.Infof("Node (IP = %s) gets out data : key = %s, value = %s.", node.IP, key, value)
-	return ok, value
+	return true, value
 }
 
 // 删除数据
@@ -514,9 +513,7 @@ func (node *Node) maintain() {
 	}()
 	go func() {
 		for node.Online {
-			node.block.Lock()
 			node.fixFinger()
-			node.block.Unlock()
 			time.Sleep(50 * time.Millisecond)
 		}
 		logrus.Infof("Node (IP = %s) stops fixing finger.", node.IP)

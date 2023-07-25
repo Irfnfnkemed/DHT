@@ -24,8 +24,8 @@ type Bucket struct {
 
 // 初始化
 func (bucket *Bucket) init(ip string, node *Node) error {
-	bucket.node = node
 	bucket.lock.Lock()
+	bucket.node = node
 	bucket.head = new(unit)
 	bucket.tail = new(unit)
 	bucket.head.next, bucket.head.prev = bucket.tail, nil

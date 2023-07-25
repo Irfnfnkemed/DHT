@@ -2,7 +2,9 @@ package kademlia
 
 import (
 	"crypto/sha1"
+	"fmt"
 	"math/big"
+	"sync"
 )
 
 var exp [161]*big.Int
@@ -27,22 +29,27 @@ type orderUnit struct {
 type Order struct {
 	head     *orderUnit
 	tail     *orderUnit
+	lock     sync.RWMutex
 	idTarget *big.Int
 	size     int
 }
 
 // 初始化
 func (order *Order) init(id *big.Int) {
+	order.lock.Lock()
 	order.head = new(orderUnit)
 	order.tail = new(orderUnit)
 	order.head.next, order.head.prev = order.tail, nil
 	order.tail.next, order.tail.prev = nil, order.head
 	order.size = 0
 	order.idTarget = new(big.Int).Set(id)
+	order.lock.Unlock()
 }
 
 // 查找order中ip所在节点
 func (order *Order) find(ip string) *orderUnit {
+	order.lock.RLock()
+	defer order.lock.RUnlock()
 	p := order.head.next
 	for p != order.tail {
 		if p.ip == ip {
@@ -56,6 +63,8 @@ func (order *Order) find(ip string) *orderUnit {
 // 按序插入order
 func (order *Order) insert(ip string) {
 	dis := xor(getHash(ip), order.idTarget)
+	order.lock.Lock()
+	defer order.lock.Unlock()
 	p := order.head.next
 	for p != order.tail {
 		if dis.Cmp(p.dis) < 0 {
@@ -71,9 +80,10 @@ func (order *Order) insert(ip string) {
 
 // 得到order中的前a个未执行查找的节点
 func (order *Order) getUndoneAlpha() []*orderUnit {
-	p := order.head.next
 	getList := []*orderUnit{}
 	size := 0
+	order.lock.RLock()
+	p := order.head.next
 	for p != order.tail {
 		if !p.done {
 			getList = append(getList, p)
@@ -84,12 +94,14 @@ func (order *Order) getUndoneAlpha() []*orderUnit {
 		}
 		p = p.next
 	}
+	order.lock.RUnlock()
 	return getList
 }
 
 // 得到order中所有的未执行查找的节点
 func (order *Order) getUndoneAll() []*orderUnit {
 	callList := []*orderUnit{}
+	order.lock.RLock()
 	p := order.head.next
 	for p != order.tail {
 		if !p.done {
@@ -97,14 +109,16 @@ func (order *Order) getUndoneAll() []*orderUnit {
 		}
 		p = p.next
 	}
+	order.lock.RUnlock()
 	return callList
 }
 
 // 得到order中前k个ip
 func (order *Order) getClosest() []string {
 	getList := []string{}
-	p := order.head.next
 	size := 0
+	order.lock.RLock()
+	p := order.head.next
 	for p != order.tail {
 		getList = append(getList, p.ip)
 		size++
@@ -113,14 +127,17 @@ func (order *Order) getClosest() []string {
 		}
 		p = p.next
 	}
+	order.lock.RUnlock()
 	return getList
 }
 
 // 从order中删去节点
 func (order *Order) delete(p *orderUnit) {
+	order.lock.Lock()
 	p.next.prev = p.prev
 	p.prev.next = p.next
 	order.size--
+	order.lock.Unlock()
 }
 
 // 根据找到的节点列表，刷新order
@@ -134,6 +151,16 @@ func (order *Order) flush(findList []string) bool {
 		}
 	}
 	return flag
+}
+
+func (order *Order) A() {
+	order.lock.RLock()
+	p := order.head.next
+	for p != order.tail {
+		fmt.Println(p.ip, p.done)
+		p = p.next
+	}
+	order.lock.RUnlock()
 }
 
 // 得到hash值

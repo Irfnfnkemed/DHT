@@ -42,6 +42,17 @@ func (data *Data) getRepublishList() []DataPair {
 	return republishList
 }
 
+// 给出所有数据
+func (data *Data) getAllList() []DataPair {
+	allList := []DataPair{}
+	data.dataLock.RLock()
+	for key, value := range data.dataPair {
+		allList = append(allList, DataPair{key, value})
+	}
+	data.dataLock.RUnlock()
+	return allList
+}
+
 // 查找数据
 func (data *Data) get(key string) (string, bool) {
 	data.dataLock.RLock()
