@@ -3,10 +3,13 @@ package chord
 import (
 	"math/big"
 	"math/rand"
+	"os"
 	"sync"
 	"time"
 
 	"dht/rpc"
+
+	"github.com/sirupsen/logrus"
 )
 
 type ValuePair struct {
@@ -50,8 +53,8 @@ type Node struct {
 
 // 整体初始化
 func init() {
-	//f, _ := os.Create("dht-test.log")
-	//logrus.SetOutput(f)
+	f, _ := os.Create("dht-test2.log")
+	logrus.SetOutput(f)
 	initCal()
 }
 
@@ -89,19 +92,20 @@ func (node *Node) Init(ip string) bool {
 // 节点开始运作
 func (node *Node) Run() {
 	node.Online = true
-	go node.RPC.Serve(node.IP, "DHT", node.start, node.quit, &RPCWrapper{node})
+	node.RPC.Register("Chord", &RPCWrapper{node})
+	go node.RPC.Serve(node.IP, node.start, node.quit)
 }
 
 // 创建DHT网络(加入第一个节点)
 func (node *Node) Create() {
 	rand.Seed(time.Now().UnixNano())
-	//logrus.Infof("Create a new DHT net.")
+	logrus.Infof("Create a new DHT net.")
 	node.preLock.Lock()
 	node.predecessor = node.IP
 	node.preLock.Unlock()
 	select { // 阻塞直至run()完成
 	case <-node.start:
-		//logrus.Infof("New node (IP = %s, ID = %v) joins in.", node.IP, node.ID)
+		logrus.Infof("New node (IP = %s, ID = %v) joins in.", node.IP, node.ID)
 	}
 	node.maintain()
 }
@@ -114,11 +118,11 @@ func (node *Node) Join(ip string) bool {
 	successor := ""
 	select { // 阻塞直至run()完成
 	case <-node.start:
-		//logrus.Infof("New node (IP = %s, ID = %v) joins in.", node.IP, node.ID)
+		logrus.Infof("New node (IP = %s, ID = %v) joins in.", node.IP, node.ID)
 	}
-	err := node.RPC.RemoteCall(ip, "DHT.FindSuccessor", node.ID, &successor)
+	err := node.RPC.RemoteCall(ip, "Chord.FindSuccessor", node.ID, &successor)
 	if err != nil {
-		//logrus.Errorf("Join error (IP = %s): %v.", node.IP, err)
+		logrus.Errorf("Join error (IP = %s): %v.", node.IP, err)
 		return false
 	}
 	node.sucLock.Lock()
@@ -148,18 +152,18 @@ func (node *Node) Quit() {
 	wg.Add(4)
 	go func() {
 		if predecessor != "" && predecessor != "OFFLINE" && predecessor != node.IP {
-			node.RPC.RemoteCall(predecessor, "DHT.Lock", Null{}, &Null{})
+			node.RPC.RemoteCall(predecessor, "Chord.Lock", Null{}, &Null{})
 		}
 		if predecessor != "" && predecessor != "OFFLINE" {
-			node.RPC.RemoteCall(predecessor, "DHT.ChangeSuccessorList", successorList, &Null{})
+			node.RPC.RemoteCall(predecessor, "Chord.ChangeSuccessorList", successorList, &Null{})
 		}
 		wg.Done()
 	}()
 	go func() {
 		if predecessor != successorList[0] && successorList[0] != node.IP {
-			node.RPC.RemoteCall(successorList[0], "DHT.Lock", Null{}, &Null{})
+			node.RPC.RemoteCall(successorList[0], "Chord.Lock", Null{}, &Null{})
 		}
-		node.RPC.RemoteCall(successorList[0], "DHT.ChangePredecessor", predecessor, &Null{})
+		node.RPC.RemoteCall(successorList[0], "Chord.ChangePredecessor", predecessor, &Null{})
 		wg.Done()
 	}()
 	go func() { //转移主数据
@@ -171,8 +175,8 @@ func (node *Node) Quit() {
 			keys = append(keys, key)
 		}
 		node.dataLock.RUnlock()
-		node.RPC.RemoteCall(successorList[0], "DHT.PutInAll", data, &Null{})
-		node.RPC.RemoteCall(successorList[0], "DHT.DeleteOffBackup", keys, &Null{})
+		node.RPC.RemoteCall(successorList[0], "Chord.PutInAll", data, &Null{})
+		node.RPC.RemoteCall(successorList[0], "Chord.DeleteOffBackup", keys, &Null{})
 		wg.Done()
 	}()
 	go func() { //转移备份
@@ -182,19 +186,19 @@ func (node *Node) Quit() {
 			dataBackup = append(dataBackup, DataPair{key, valuePair})
 		}
 		node.dataBackupLock.RUnlock()
-		node.RPC.RemoteCall(successorList[0], "DHT.PutInBackup", dataBackup, &Null{})
+		node.RPC.RemoteCall(successorList[0], "Chord.PutInBackup", dataBackup, &Null{})
 		wg.Done()
 	}()
 	wg.Wait()
 	if predecessor != "" && predecessor != "OFFLINE" {
-		node.RPC.RemoteCall(predecessor, "DHT.Unlock", Null{}, &Null{})
+		node.RPC.RemoteCall(predecessor, "Chord.Unlock", Null{}, &Null{})
 	}
 	if predecessor != successorList[0] {
-		node.RPC.RemoteCall(successorList[0], "DHT.Unlock", Null{}, &Null{})
+		node.RPC.RemoteCall(successorList[0], "Chord.Unlock", Null{}, &Null{})
 	}
 	node.Online = false
 	close(node.quit)
-	//logrus.Infof("Node (IP = %s, ID = %v) quits.", node.IP, node.ID)
+	logrus.Infof("Node (IP = %s, ID = %v) quits.", node.IP, node.ID)
 }
 
 // 强制退出DHT网络(未通知其他节点)
@@ -204,19 +208,19 @@ func (node *Node) ForceQuit() {
 	}
 	node.Online = false
 	close(node.quit)
-	//logrus.Infof("Node (IP = %s, ID = %v) force quits.", node.IP, node.ID)
+	logrus.Infof("Node (IP = %s, ID = %v) force quits.", node.IP, node.ID)
 }
 
 // 存入数据
-func (node *Node) Put(key string, value string) bool {
+func (node *Node) Put(key, value string) bool {
 	id := getHash(key)
 	ip, _ := node.FindSuccessor(id)
-	err := node.RPC.RemoteCall(ip, "DHT.PutInAll", []DataPair{{key, ValuePair{value, id}}}, &Null{})
+	err := node.RPC.RemoteCall(ip, "Chord.PutInAll", []DataPair{{key, ValuePair{value, id}}}, &Null{})
 	if err != nil {
-		//logrus.Errorf("Node (IP = %s) putting in data error (key = %s, value = %s): %v.", node.IP, key, value, err)
+		logrus.Errorf("Node (IP = %s) putting in data error (key = %s, value = %s): %v.", node.IP, key, value, err)
 		return false
 	}
-	//logrus.Infof("Node (IP = %s) puts in data : key = %s, value = %s.", node.IP, key, value)
+	logrus.Infof("Node (IP = %s) puts in data : key = %s, value = %s.", node.IP, key, value)
 	return true
 }
 
@@ -230,26 +234,27 @@ func (node *Node) Get(key string) (ok bool, value string) {
 		value, ok = node.GetOut(key)
 	} else {
 		ip, _ := node.FindSuccessor(id)
-		err := node.RPC.RemoteCall(ip, "DHT.GetOut", key, &value)
+		err := node.RPC.RemoteCall(ip, "Chord.GetOut", key, &value)
 		if err != nil {
-			//logrus.Errorf("Node (IP = %s) getting out data error (key = %s, value = %s): %v.", node.IP, key, value, err)
+			logrus.Errorf("Node (IP = %s) getting out data error (key = %s, value = %s): %v.", node.IP, key, value, err)
 			return false, ""
 		}
+		ok = true
 	}
-	//logrus.Infof("Node (IP = %s) gets out data : key = %s, value = %s.", node.IP, key, value)
-	return true, value
+	logrus.Infof("Node (IP = %s) gets out data : key = %s, value = %s.", node.IP, key, value)
+	return ok, value
 }
 
 // 删除数据
 func (node *Node) Delete(key string) bool {
 	id := getHash(key)
 	ip, _ := node.FindSuccessor(id)
-	err := node.RPC.RemoteCall(ip, "DHT.DeleteOffAll", []string{key}, &Null{})
+	err := node.RPC.RemoteCall(ip, "Chord.DeleteOffAll", []string{key}, &Null{})
 	if err != nil {
-		//logrus.Errorf("Node (IP = %s) deleting off data error (key = %s): %v.", node.IP, key, err)
+		logrus.Errorf("Node (IP = %s) deleting off data error (key = %s): %v.", node.IP, key, err)
 		return false
 	}
-	//logrus.Infof("Node (IP = %s) delete off data : key = %s.", node.IP, key)
+	logrus.Infof("Node (IP = %s) delete off data : key = %s.", node.IP, key)
 	return true
 }
 
@@ -261,12 +266,12 @@ func (node *Node) FindSuccessor(id *big.Int) (ip string, err error) {
 	}
 	pre, err := node.FindPredecessor(id)
 	if err != nil {
-		//logrus.Errorf("FindSuccessor error (IP = %s): %v.", node.IP, err)
+		logrus.Errorf("FindSuccessor error (IP = %s): %v.", node.IP, err)
 		return "", err
 	}
-	err = node.RPC.RemoteCall(pre, "DHT.GetSuccessor", Null{}, &ip)
+	err = node.RPC.RemoteCall(pre, "Chord.GetSuccessor", Null{}, &ip)
 	if err != nil {
-		//logrus.Errorf("FindSuccessor error (IP = %s): %v.", node.IP, err)
+		logrus.Errorf("FindSuccessor error (IP = %s): %v.", node.IP, err)
 		return "", err
 	}
 	return ip, nil
@@ -279,9 +284,9 @@ func (node *Node) FindPredecessor(id *big.Int) (ip string, err error) {
 	successorId := getHash(node.successorList[0])
 	node.sucLock.RUnlock()
 	if !belong(false, true, node.ID, successorId, id) {
-		err = node.RPC.RemoteCall(node.closestPrecedingFinger(id), "DHT.FindPredecessor", id, &ip)
+		err = node.RPC.RemoteCall(node.closestPrecedingFinger(id), "Chord.FindPredecessor", id, &ip)
 		if err != nil {
-			//logrus.Errorf("FindPredecessor error (IP = %s): %v.", node.IP, err)
+			logrus.Errorf("FindPredecessor error (IP = %s): %v.", node.IP, err)
 			return "", err
 		}
 	}
@@ -324,12 +329,12 @@ func (node *Node) GetPredecessor() (string, error) {
 		node.dataLock.Unlock()
 		successor, err := node.GetSuccessor()
 		if err != nil {
-			//logrus.Errorf("Restoring data error (IP = %s): %v.", node.IP, err)
+			logrus.Errorf("Restoring data error (IP = %s): %v.", node.IP, err)
 			return "OFFLINE", err
 		}
-		err = node.RPC.RemoteCall(successor, "DHT.PutInBackup", dataBackup, &Null{})
+		err = node.RPC.RemoteCall(successor, "Chord.PutInBackup", dataBackup, &Null{})
 		if err != nil {
-			//logrus.Errorf("Restoring data error (IP = %s): %v.", node.IP, err)
+			logrus.Errorf("Restoring data error (IP = %s): %v.", node.IP, err)
 			return "OFFLINE", err
 		}
 	}
@@ -361,7 +366,7 @@ func (node *Node) closestPrecedingFinger(id *big.Int) string {
 
 // 测试节点是否上线
 func (node *Node) Ping(ip string) bool {
-	err := node.RPC.RemoteCall(ip, "DHT.Ping", Null{}, &Null{})
+	err := node.RPC.RemoteCall(ip, "Chord.Ping", Null{}, &Null{})
 	return err == nil
 }
 
@@ -369,13 +374,13 @@ func (node *Node) Ping(ip string) bool {
 func (node *Node) stabilize() error {
 	successor, err := node.GetSuccessor()
 	if err != nil {
-		//logrus.Errorf("Stabilize error (IP = %s): %v.", node.IP, err)
+		logrus.Errorf("Stabilize error (IP = %s): %v.", node.IP, err)
 		return err
 	}
 	ip := ""
-	err = node.RPC.RemoteCall(successor, "DHT.GetPredecessor", Null{}, &ip)
+	err = node.RPC.RemoteCall(successor, "Chord.GetPredecessor", Null{}, &ip)
 	if err != nil {
-		//logrus.Errorf("Stabilize error (IP = %s): %v.", node.IP, err)
+		logrus.Errorf("Stabilize error (IP = %s): %v.", node.IP, err)
 		return err
 	}
 	if (successor == node.IP) ||
@@ -385,14 +390,14 @@ func (node *Node) stabilize() error {
 		node.successorList[1] = node.successorList[0]
 		node.successorList[0] = ip
 		node.sucLock.Unlock()
-		node.RPC.RemoteCall(successor, "DHT.TransferData", IpPair{ip, node.IP}, &Null{})
+		node.RPC.RemoteCall(successor, "Chord.TransferData", IpPair{ip, node.IP}, &Null{})
 	}
 	node.sucLock.RLock()
 	successor = node.successorList[0]
 	node.sucLock.RUnlock()
-	err = node.RPC.RemoteCall(successor, "DHT.Notifty", node.IP, &Null{})
+	err = node.RPC.RemoteCall(successor, "Chord.Notifty", node.IP, &Null{})
 	if err != nil {
-		//logrus.Errorf("Stabilize error (IP = %s): %v.", node.IP, err)
+		logrus.Errorf("Stabilize error (IP = %s): %v.", node.IP, err)
 		return err
 	}
 	if ip == "OFFLINE" {
@@ -402,9 +407,9 @@ func (node *Node) stabilize() error {
 			data = append(data, DataPair{key, valuePair})
 		}
 		node.dataLock.RUnlock()
-		err = node.RPC.RemoteCall(successor, "DHT.PutInBackup", data, &Null{})
+		err = node.RPC.RemoteCall(successor, "Chord.PutInBackup", data, &Null{})
 		if err != nil {
-			//logrus.Errorf("Restoring data error (IP = %s): %v.", node.IP, err)
+			logrus.Errorf("Restoring data error (IP = %s): %v.", node.IP, err)
 			return err
 		}
 	}
@@ -440,9 +445,9 @@ func (node *Node) TransferData(ips IpPair) error { //将数据转移到前节点
 		delete(node.data, dataPair.Key)
 	}
 	node.dataLock.Unlock()
-	err := node.RPC.RemoteCall(ips.IpPre, "DHT.PutIn", data, &Null{})
+	err := node.RPC.RemoteCall(ips.IpPre, "Chord.PutIn", data, &Null{})
 	if err != nil {
-		//logrus.Errorf("Node (IP = %s , toIp = %s) transferring data error: %v.", node.IP, ips.IpPre, err)
+		logrus.Errorf("Node (IP = %s , toIp = %s) transferring data error: %v.", node.IP, ips.IpPre, err)
 		return err
 	}
 	//转移主数据对应的备份
@@ -454,9 +459,9 @@ func (node *Node) TransferData(ips IpPair) error { //将数据转移到前节点
 	}
 	node.dataBackupLock.Unlock()
 	successor, _ := node.GetSuccessor()
-	err = node.RPC.RemoteCall(successor, "DHT.DeleteOffBackup", keyBackup, &Null{})
+	err = node.RPC.RemoteCall(successor, "Chord.DeleteOffBackup", keyBackup, &Null{})
 	if err != nil {
-		//logrus.Errorf("Node (IP = %s , sucIp = %s) transferring backup data error: %v.", node.IP, successor, err)
+		logrus.Errorf("Node (IP = %s , sucIp = %s) transferring backup data error: %v.", node.IP, successor, err)
 		return err
 	}
 	//转移备份
@@ -473,9 +478,9 @@ func (node *Node) TransferData(ips IpPair) error { //将数据转移到前节点
 		delete(node.dataBackup, dataPair.Key)
 	}
 	node.dataBackupLock.Unlock()
-	err = node.RPC.RemoteCall(ips.IpPre, "DHT.PutInBackup", dataBackup, &Null{})
+	err = node.RPC.RemoteCall(ips.IpPre, "Chord.PutInBackup", dataBackup, &Null{})
 	if err != nil {
-		//logrus.Errorf("Node (IP = %s , toIp = %s) transferring backup data error: %v.", node.IP, ips.IpPre, err)
+		logrus.Errorf("Node (IP = %s , toIp = %s) transferring backup data error: %v.", node.IP, ips.IpPre, err)
 		return err
 	}
 	return nil
@@ -485,7 +490,7 @@ func (node *Node) TransferData(ips IpPair) error { //将数据转移到前节点
 func (node *Node) fixFinger() error {
 	ip, err := node.FindSuccessor(node.fingerStart[node.fixIndex])
 	if err != nil {
-		//logrus.Errorf("Fixing finger error (IP = %s): %v.", node.IP, err)
+		logrus.Errorf("Fixing finger error (IP = %s): %v.", node.IP, err)
 		return err
 	}
 	node.fingerLock.Lock()
@@ -506,14 +511,14 @@ func (node *Node) maintain() {
 			node.block.Unlock()
 			time.Sleep(50 * time.Millisecond)
 		}
-		//logrus.Infof("Node (IP = %s) stops stablizing.", node.IP)
+		logrus.Infof("Node (IP = %s) stops stablizing.", node.IP)
 	}()
 	go func() {
 		for node.Online {
 			node.fixFinger()
 			time.Sleep(50 * time.Millisecond)
 		}
-		//logrus.Infof("Node (IP = %s) stops fixing finger.", node.IP)
+		logrus.Infof("Node (IP = %s) stops fixing finger.", node.IP)
 	}()
 }
 
@@ -554,9 +559,9 @@ func (node *Node) updateSuccessorList() error {
 	node.sucLock.RUnlock()
 	for _, ip := range tmp {
 		if node.Ping(ip) { //找到最近的存在的后继
-			err := node.RPC.RemoteCall(ip, "DHT.GetSuccessorList", Null{}, &nextSuccessorList)
+			err := node.RPC.RemoteCall(ip, "Chord.GetSuccessorList", Null{}, &nextSuccessorList)
 			if err != nil {
-				//logrus.Errorf("Getting successor list error (IP = %s): %v.", node.IP, err)
+				logrus.Errorf("Getting successor list error (IP = %s): %v.", node.IP, err)
 				continue
 			}
 			node.sucLock.Lock()
@@ -568,11 +573,11 @@ func (node *Node) updateSuccessorList() error {
 			return nil
 		}
 	}
-	//logrus.Infof("All successors are offline (IP = %s).", node.IP)
+	logrus.Infof("All successors are offline (IP = %s).", node.IP)
 	//后继列表中节点均失效，尝试通过路由表寻找以防止环断裂
 	ip, err := node.FindSuccessor(cal(node.ID, 0))
 	if err != nil {
-		//logrus.Errorf("Finding successor list error (IP = %s): %v.", node.IP, err)
+		logrus.Errorf("Finding successor list error (IP = %s): %v.", node.IP, err)
 	}
 	node.sucLock.Lock()
 	for i := range node.successorList {
@@ -600,7 +605,12 @@ func (node *Node) Unlock() {
 func (node *Node) PutIn(data []DataPair) error {
 	node.dataLock.Lock()
 	for i := range data {
-		node.data[data[i].Key] = data[i].Values
+		_, ok := node.data[data[i].Key]
+		if !ok {
+			node.data[data[i].Key] = data[i].Values
+		} else {
+			node.data[data[i].Key] = dataPut(node.data[data[i].Key], data[i].Values)
+		}
 	}
 	node.dataLock.Unlock()
 	return nil
@@ -622,12 +632,12 @@ func (node *Node) PutInAll(data []DataPair) error {
 	//后继节点放入备份数据
 	successor, err := node.GetSuccessor()
 	if err != nil {
-		//logrus.Errorf("Getting successor error (IP = %s): %v.", node.IP, err)
+		logrus.Errorf("Getting successor error (IP = %s): %v.", node.IP, err)
 		return err
 	}
-	err = node.RPC.RemoteCall(successor, "DHT.PutInBackup", data, &Null{})
+	err = node.RPC.RemoteCall(successor, "Chord.PutInBackup", data, &Null{})
 	if err != nil {
-		//logrus.Errorf("Putting in backup error (IP = %s): %v.", node.IP, err)
+		logrus.Errorf("Putting in backup error (IP = %s): %v.", node.IP, err)
 	}
 	return nil
 }
@@ -656,12 +666,12 @@ func (node *Node) DeleteOffAll(keys []string) bool {
 	//删除后继节点的备份数据
 	successor, err := node.GetSuccessor()
 	if err != nil {
-		//logrus.Errorf("Getting successor error (IP = %s): %v.", node.IP, err)
+		logrus.Errorf("Getting successor error (IP = %s): %v.", node.IP, err)
 		return false
 	}
-	err = node.RPC.RemoteCall(successor, "DHT.DeleteOffBackup", keys, &Null{})
+	err = node.RPC.RemoteCall(successor, "Chord.DeleteOffBackup", keys, &Null{})
 	if err != nil {
-		//logrus.Errorf("Deleting off backup error (IP = %s): %v.", node.IP, err)
+		logrus.Errorf("Deleting off backup error (IP = %s): %v.", node.IP, err)
 		return false
 	}
 	return out
