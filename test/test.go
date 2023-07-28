@@ -1,25 +1,46 @@
 package test
 
 import (
-	"flag"
+	"bufio"
 	"os"
+	"strings"
 	"time"
 )
 
-var (
-	Help         bool
-	TestName     string
-	ProtocolTest string
-)
+var testName string
 
 func Test() {
+	yellow.Println("Which protocol do you want to test?\nType naive/chord/kademlia")
+	for {
+		reader := bufio.NewReader(os.Stdin)
+		protocol, _ := reader.ReadString('\n')
+		protocol = strings.TrimRight(protocol, string('\n'))
+		if protocol != "naive" && protocol != "chord" && protocol != "kademlia" {
+			red.Println("Protocol name error! Please type again.")
+		} else {
+			SetProtocol(protocol)
+			break
+		}
+	}
+	yellow.Println("Which part do you want to test?\nType basic/advance/all")
+	for {
+		reader := bufio.NewReader(os.Stdin)
+		part, _ := reader.ReadString('\n')
+		part = strings.TrimRight(part, string('\n'))
+		if part != "basic" && part != "advance" && part != "all" {
+			red.Println("Part name error! Please type again.")
+		} else {
+			testName = part
+			break
+		}
+	}
 	yellow.Printf("Welcome to DHT-2023 Test Program!\n\n")
 
 	var basicFailRate float64
 	var forceQuitFailRate float64
 	var QASFailRate float64
 
-	switch TestName {
+	switch testName {
 	case "all":
 		fallthrough
 	case "basic":
@@ -37,7 +58,7 @@ func Test() {
 			green.Printf("Basic test passed with fail rate %.4f\n\n", basicFailRate)
 		}
 
-		if TestName == "basic" {
+		if testName == "basic" {
 			break
 		}
 		time.Sleep(afterTestSleepTime)
@@ -93,9 +114,4 @@ func Test() {
 	} else {
 		green.Printf("Quit & Stabilize test passed with fail rate %.4f\n", QASFailRate)
 	}
-}
-
-func Usage() {
-	red.Println("For example: ./dht -protocol kademlia -test all")
-	flag.PrintDefaults()
 }

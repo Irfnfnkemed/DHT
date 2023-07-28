@@ -6,6 +6,39 @@ import (
 	"time"
 )
 
+func Chat() {
+	node := new(ChatNode)
+	PrintCentre("Please type your name:", "yellow")
+	userName := Scan('\n')
+	PrintCentre("Please type your IP:", "yellow")
+	userIp := Scan('\n')
+	PrintCentre("Creat/Join?", "yellow")
+	PrintCentre("Type Y(y)/N(n):", "yellow")
+	tmp := Scan('\n')
+	flag := (tmp == "Y" || tmp == "y")
+	if flag {
+		err := node.Login(userName, userIp, "")
+		if err != nil {
+			PrintCentre(err.Error(), "red")
+		} else {
+			PrintCentre("Successfully log in.", "yellow")
+		}
+	} else {
+		PrintCentre("Please type the node IP (the node is in the P2P chat system):", "yellow")
+		enterIp := Scan('\n')
+		err := node.Login(userName, userIp, enterIp)
+		if err != nil {
+			PrintCentre(err.Error(), "red")
+		} else {
+			PrintCentre("Successfully log in.", "yellow")
+		}
+	}
+	PrintCentre("Type anything to continue.", "white")
+	Scan('\n')
+	node.Interactive()
+	node.LogOut()
+}
+
 func (chatNode *ChatNode) Interactive() {
 	next := "HomePage"
 	for {
@@ -491,7 +524,7 @@ func (chatNode *ChatNode) ViewGroupChatInvitation() string {
 				if err != nil {
 					PrintCentre(err.Error(), "red")
 				} else {
-					PrintCentre("Successfully enter the group chat.", "green")
+					PrintCentre("Successfully enter the group ", "green")
 				}
 				flush = true
 			}
@@ -597,7 +630,7 @@ func (chatNode *ChatNode) ViewGroupChatList() string {
 							fmt.Println(separator)
 							PrintCentre("Press enter to refresh the chat records.", "magenta")
 							PrintCentre("Press left arrow to return to superior page.", "magenta")
-							PrintCentre("Type messages to chat.", "magenta")
+							PrintCentre("Type messages to ", "magenta")
 							control := Scan('\n')
 							if control == "" {
 								continue
