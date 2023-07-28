@@ -8,14 +8,15 @@ import (
 	"time"
 )
 
-const k = 16 //bucket的大小
+const k = 30 //bucket的大小
 const a = 3  //NodeLookup中的alpha大小
-const RepulishCircleTime = 10 * time.Second
-const AbandonCircleTime = 200 * time.Second
-const RefreshCircleTime = time.Second
+const RepulishCircleTime = 15 * time.Second
+const AbandonCircleTime = 60 * time.Second
+const RefreshCircleTime = 3 * time.Second
 const LookupTimeOut = 5 * time.Second
 const RepulishTimeOut = 15 * time.Second
-const FindNodeTimeOut = 1 * time.Second
+const RepublishAllTimeOut = 25 * time.Second
+const FindNodeTimeOut = 250 * time.Millisecond
 
 type Null struct{}
 
@@ -48,7 +49,7 @@ type Node struct {
 
 // 整体初始化
 func init() {
-	//f, _ := os.Create("dht-test.log")
+	//f, _ := os.Create("dht-test.//log")
 	//logrus.SetOutput(f)
 	initCal()
 }
@@ -61,7 +62,7 @@ func (node *Node) Init(ip string) error {
 	for i := range node.buckets {
 		node.buckets[i].init(node.IP, node)
 	}
-	node.refreshIndex = 0
+	node.refreshIndex = 150
 	node.data.Init()
 	node.start = make(chan bool, 1)
 	node.quit = make(chan bool, 1)
@@ -71,7 +72,8 @@ func (node *Node) Init(ip string) error {
 // 节点开始运作
 func (node *Node) Run() {
 	node.Online = true
-	go node.RPC.Serve(node.IP, "DHT", node.start, node.quit, &RPCWrapper{node})
+	node.RPC.Register("Kademlia", &RPCWrapper{node})
+	go node.RPC.Serve(node.IP, node.start, node.quit)
 }
 
 // 创建DHT网络(加入第一个节点)
@@ -111,7 +113,7 @@ func (node *Node) Put(key string, value string) bool {
 				node.data.put(key, value)
 				flag = true
 			} else {
-				err := node.RPC.RemoteCall(ip, "DHT.PutIn", IpDataPairs{node.IP, DataPair{key, value}}, &Null{})
+				err := node.RPC.RemoteCall(ip, "Kademlia.PutIn", IpDataPairs{node.IP, DataPair{key, value}}, &Null{})
 				if err != nil {
 					//logrus.Errorf("Putting in error, IP = %s: %v", ip, err)
 				}
@@ -166,7 +168,7 @@ func (node *Node) Quit() {
 	if !node.Online {
 		return
 	}
-	node.republish(node.data.getAllList())
+	node.republish(node.data.getAllList(), RepublishAllTimeOut)
 	node.Online = false
 	close(node.quit)
 	//logrus.Infof("Node (IP = %s, ID = %v) quits.", node.IP, node.ID)
@@ -187,7 +189,7 @@ func (node *Node) Ping(ipTo string) bool {
 	if ipTo == "" {
 		return false
 	}
-	err := node.RPC.RemoteCall(ipTo, "DHT.Ping", Null{}, &Null{})
+	err := node.RPC.RemoteCall(ipTo, "Kademlia.Ping", Null{}, &Null{})
 	return err == nil
 }
 
@@ -299,7 +301,7 @@ func (node *Node) findNodeList(order *Order, callList []*orderUnit, idTarget *bi
 			subFindList := []string{}
 			defer wg.Done()
 			q.done = true
-			err := node.RPC.RemoteCall(q.ip, "DHT.FindNode", IpIdPairs{node.IP, idTarget}, &subFindList)
+			err := node.RPC.RemoteCall(q.ip, "Kademlia.FindNode", IpIdPairs{node.IP, idTarget}, &subFindList)
 			node.flush(q.ip, err == nil)
 			if err != nil {
 				//logrus.Errorf("FindNode error, server IP = %s", q.ip)
@@ -316,11 +318,20 @@ func (node *Node) findNodeList(order *Order, callList []*orderUnit, idTarget *bi
 }
 
 // 重新发布一个节点的数据
-func (node *Node) republish(republishList []DataPair) {
+func (node *Node) republish(republishList []DataPair, timeOut time.Duration) {
 	done := make(chan bool, 1)
+	var wg sync.WaitGroup
 	go func() {
+		wg.Add(len(republishList))
 		for _, dataPair := range republishList {
-			node.republishData(dataPair)
+			doneRepub := make(chan bool, 1)
+			go node.republishData(dataPair, &wg, doneRepub)
+			select {
+			case <-doneRepub:
+				continue
+			case <-time.After(25 * time.Millisecond):
+				continue
+			}
 		}
 		done <- true
 		return
@@ -329,24 +340,24 @@ func (node *Node) republish(republishList []DataPair) {
 	case <-done:
 		//logrus.Infof("Node (IP = %s) republishes the data.", node.IP)
 		return
-	case <-time.After(RepulishTimeOut):
+	case <-time.After(timeOut):
 		//logrus.Errorf("Time out: func republish, IP = %s", node.IP)
 		return
 	}
 }
 
 // 发布一条数据
-func (node *Node) republishData(dataPair DataPair) {
+func (node *Node) republishData(dataPair DataPair, wg *sync.WaitGroup, done chan bool) {
 	nodeList := node.nodeLookup(getHash(dataPair.Key))
-	var wg sync.WaitGroup
-	wg.Add(len(nodeList))
+	var wgPut sync.WaitGroup
+	wgPut.Add(len(nodeList))
 	for _, ip := range nodeList {
 		go func(ip string) {
-			defer wg.Done()
+			defer wgPut.Done()
 			if ip == node.IP {
 				node.PutIn(dataPair)
 			} else {
-				err := node.RPC.RemoteCall(ip, "DHT.PutIn", IpDataPairs{node.IP, dataPair}, &Null{})
+				err := node.RPC.RemoteCall(ip, "Kademlia.PutIn", IpDataPairs{node.IP, dataPair}, &Null{})
 				if err != nil {
 					//logrus.Errorf("Republishing error, IP = %s: %v", ip, err)
 				}
@@ -354,7 +365,9 @@ func (node *Node) republishData(dataPair DataPair) {
 			}
 		}(ip)
 	}
-	wg.Wait()
+	wgPut.Wait()
+	wg.Done()
+	done <- true
 }
 
 // 将某条数据存入该节点
@@ -373,14 +386,14 @@ func (node *Node) findValueList(order *Order, callList []*orderUnit, key string)
 	for _, p := range callList {
 		subFindList := []string{}
 		p.done = true
-		err := node.RPC.RemoteCall(p.ip, "DHT.FindNode", IpIdPairs{node.IP, getHash(key)}, &subFindList)
+		err := node.RPC.RemoteCall(p.ip, "Kademlia.FindNode", IpIdPairs{node.IP, getHash(key)}, &subFindList)
 		node.flush(p.ip, err == nil)
 		if err != nil {
 			//logrus.Errorf("FindNode error, server IP = %s", p.ip)
 			order.delete(p)
 			continue
 		}
-		err = node.RPC.RemoteCall(p.ip, "DHT.Getout", IpPairs{node.IP, key}, &value)
+		err = node.RPC.RemoteCall(p.ip, "Kademlia.Getout", IpPairs{node.IP, key}, &value)
 		if err != nil {
 			//logrus.Errorf("findValueList error, server IP = %s", p.ip)
 			continue
@@ -401,17 +414,17 @@ func (node *Node) abandon() {
 // 定期检查bucket，尽量使得bucket不要为空
 func (node *Node) refresh() {
 	node.buckets[node.refreshIndex].check()
-	if node.buckets[node.refreshIndex].getSize() < 2 {
+	if node.refreshIndex >= 150 && node.buckets[node.refreshIndex].getSize() < 2 {
 		node.nodeLookup(exp[node.refreshIndex])
 	}
-	node.refreshIndex = (node.refreshIndex + 1) % 160
+	node.refreshIndex = (node.refreshIndex-149)%10 + 150
 }
 
 // 定期维护结构与数据分布
 func (node *Node) maintain() {
 	go func() {
 		for node.Online {
-			node.republish(node.data.getRepublishList())
+			node.republish(node.data.getRepublishList(), RepulishTimeOut)
 			time.Sleep(RepulishCircleTime)
 		}
 		//logrus.Infof("Node (IP = %s) stops republishing.", node.IP)

@@ -2,35 +2,15 @@ package test
 
 import (
 	"flag"
-	"math/rand"
 	"os"
 	"time"
 )
 
 var (
-	help     bool
-	testName string
-	protocol string
+	Help         bool
+	TestName     string
+	ProtocolTest string
 )
-
-func init() {
-	flag.BoolVar(&help, "help", false, "help")
-	flag.StringVar(&protocol, "protocol", "", "which protocol do you want to run: naive/chord/kademlia")
-	flag.StringVar(&testName, "test", "", "which test(s) do you want to run: basic/advance/all")
-	flag.Usage = usage
-	flag.Parse()
-	if help || (protocol != "naive" && protocol != "chord" && protocol != "kademlia") {
-		flag.Usage()
-		os.Exit(0)
-	}
-	SetProtocol(protocol)
-	if help || (testName != "basic" && testName != "advance" && testName != "all") {
-		flag.Usage()
-		os.Exit(0)
-	}
-
-	rand.Seed(time.Now().UnixNano())
-}
 
 func Test() {
 	yellow.Printf("Welcome to DHT-2023 Test Program!\n\n")
@@ -39,7 +19,7 @@ func Test() {
 	var forceQuitFailRate float64
 	var QASFailRate float64
 
-	switch testName {
+	switch TestName {
 	case "all":
 		fallthrough
 	case "basic":
@@ -57,7 +37,7 @@ func Test() {
 			green.Printf("Basic test passed with fail rate %.4f\n\n", basicFailRate)
 		}
 
-		if testName == "basic" {
+		if TestName == "basic" {
 			break
 		}
 		time.Sleep(afterTestSleepTime)
@@ -115,7 +95,7 @@ func Test() {
 	}
 }
 
-func usage() {
+func Usage() {
 	red.Println("For example: ./dht -protocol kademlia -test all")
 	flag.PrintDefaults()
 }

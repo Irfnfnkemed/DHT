@@ -17,12 +17,69 @@ type NodeRpc struct {
 	clientLock  sync.RWMutex
 	connLock    sync.RWMutex
 	listening   bool
+	serveName   []string
 }
 
 type Null struct{}
 
 const CallTimeOut = 10 * time.Second
 const PendClientTimeOut = 500 * time.Millisecond
+
+// 为节点类registerNode注册rpc服务，其中第一个注册的服务应该有Ping函数
+func (nodeRpc *NodeRpc) Register(serveName string, registerNode interface{}) error {
+	if nodeRpc.server == nil {
+		nodeRpc.server = rpc.NewServer()
+	}
+	if nodeRpc.serveName == nil {
+		nodeRpc.serveName = make([]string, 0)
+	}
+	nodeRpc.serveName = append(nodeRpc.serveName, serveName)
+	err := nodeRpc.server.RegisterName(serveName, registerNode) // registerNode是需要注册的节点的指针
+	if err != nil {
+		//logrus.Errorf("Registing error: %v.", err)
+		return err
+	} else {
+		//logrus.Infof("Regist done (name = %s).", serveName)
+		return nil
+	}
+}
+
+// 节点服务
+func (nodeRpc *NodeRpc) Serve(ip string, start, quit chan bool) error {
+	var err error = nil
+	nodeRpc.clientLock.Lock()
+	nodeRpc.connLock.Lock()
+	nodeRpc.clientPool = make(map[string]chan *rpc.Client)
+	nodeRpc.DialConns = make(chan net.Conn, 10000)
+	nodeRpc.AcceptConns = make(chan net.Conn, 10000)
+	nodeRpc.clientLock.Unlock()
+	nodeRpc.connLock.Unlock()
+	nodeRpc.listener, err = net.Listen("tcp", ip)
+	if err != nil {
+		//logrus.Errorf("Listening error (server IP = %s): %v.", ip, err)
+		return err
+	} else {
+		nodeRpc.listening = true
+		//logrus.Infof("Listen done (server IP = %s, network = tcp).", ip)
+	}
+	go func() {
+		for nodeRpc.listening {
+			err := nodeRpc.Accept()
+			if err != nil {
+				//logrus.Errorf("Accepting error (server IP = %s): %v.", ip, err)
+			}
+		}
+	}()
+	close(start) //疏通开始通道
+	select {
+	case <-quit:
+		nodeRpc.listening = false
+		nodeRpc.listener.Close()
+		nodeRpc.closeConn() //结束服务
+	}
+	//logrus.Infof("Node stops serving (server IP = %s).", ip)
+	return nil
+}
 
 // 远端调用
 func (nodeRpc *NodeRpc) RemoteCall(ip string, serviceMethod string, args interface{}, reply interface{}) error {
@@ -62,85 +119,6 @@ func (nodeRpc *NodeRpc) RemoteCall(ip string, serviceMethod string, args interfa
 	}
 }
 
-// 节点服务
-func (nodeRpc *NodeRpc) Serve(ip, serveName string, start, quit chan bool, registerNode interface{}) error {
-	var err error = nil
-	nodeRpc.server = rpc.NewServer()
-	nodeRpc.clientLock.Lock()
-	nodeRpc.connLock.Lock()
-	nodeRpc.clientPool = make(map[string]chan *rpc.Client)
-	nodeRpc.DialConns = make(chan net.Conn, 10000)
-	nodeRpc.AcceptConns = make(chan net.Conn, 10000)
-	nodeRpc.clientLock.Unlock()
-	nodeRpc.connLock.Unlock()
-	err = nodeRpc.server.RegisterName(serveName, registerNode) // registerNode是需要注册的节点的指针
-	if err != nil {
-		//logrus.Errorf("Registing error (server IP = %s): %v.", ip, err)
-		return err
-	} else {
-		//logrus.Infof("Regist done (server IP = %s, name = %s).", ip, serveName)
-	}
-	if !nodeRpc.listening {
-		nodeRpc.listener, err = net.Listen("tcp", ip)
-		if err != nil {
-			//logrus.Errorf("Listening error (server IP = %s): %v.", ip, err)
-			return err
-		} else {
-			nodeRpc.listening = true
-			//logrus.Infof("Listen done (server IP = %s, network = tcp).", ip)
-		}
-		go func() {
-			for nodeRpc.listening {
-				err := nodeRpc.AcceptAndServe()
-				if err != nil {
-					//logrus.Errorf("Accepting error (server IP = %s): %v.", ip, err)
-				}
-			}
-		}()
-	}
-	close(start) //疏通开始通道
-	select {
-	case <-quit:
-		nodeRpc.listening = false
-		nodeRpc.listener.Close()
-		nodeRpc.closeConn() //结束服务
-	}
-	//logrus.Infof("Node stops serving (server IP = %s).", ip)
-	return nil
-}
-
-// 创建一个节点对应的用户池
-func (nodeRpc *NodeRpc) createClient(ip string) error {
-	nodeRpc.clientLock.Lock()
-	nodeRpc.clientPool[ip] = make(chan *rpc.Client, 50)
-	nodeRpc.clientLock.Unlock()
-	flag := false
-	for i := 0; i < 10; i++ {
-		conn, err := net.DialTimeout("tcp", ip, time.Second)
-		if err != nil {
-			//logrus.Errorf("Dialing error (server IP = %s): %v.", ip, err)
-			break
-		}
-		client := rpc.NewClient(conn)
-		err = nodeRpc.connect(ip, client)
-		if err != nil {
-			//logrus.Errorf("Connecting error (server IP = %s): %v.", ip, err)
-			break
-		}
-		flag = true
-		nodeRpc.connLock.Lock()
-		nodeRpc.DialConns <- conn
-		nodeRpc.connLock.Unlock()
-	}
-	if flag {
-		//logrus.Infof("Create 20 clients (server IP = %s).", ip)
-	} else {
-		nodeRpc.deleteClients(ip)
-		return errors.New("Creating clients error.")
-	}
-	return nil
-}
-
 // 得到可用用户
 func (nodeRpc *NodeRpc) getClient(ip string) (*rpc.Client, error) {
 	nodeRpc.clientLock.RLock()
@@ -170,6 +148,38 @@ func (nodeRpc *NodeRpc) getClient(ip string) (*rpc.Client, error) {
 		nodeRpc.deleteClients(ip)
 		return nil, errors.New("Get client time out.") // 超时
 	}
+}
+
+// 创建nodeRpc至ip节点的连接池
+func (nodeRpc *NodeRpc) createClient(ip string) error {
+	nodeRpc.clientLock.Lock()
+	nodeRpc.clientPool[ip] = make(chan *rpc.Client, 50)
+	nodeRpc.clientLock.Unlock()
+	flag := false
+	for i := 0; i < 10; i++ {
+		conn, err := net.DialTimeout("tcp", ip, time.Second)
+		if err != nil {
+			//logrus.Errorf("Dialing error (server IP = %s): %v.", ip, err)
+			break
+		}
+		client := rpc.NewClient(conn)
+		err = nodeRpc.connect(ip, client)
+		if err != nil {
+			//logrus.Errorf("Connecting error (server IP = %s): %v.", ip, err)
+			break
+		}
+		flag = true
+		nodeRpc.connLock.Lock()
+		nodeRpc.DialConns <- conn
+		nodeRpc.connLock.Unlock()
+	}
+	if flag {
+		//logrus.Infof("Create 10 clients (server IP = %s).", ip)
+	} else {
+		nodeRpc.deleteClients(ip)
+		return errors.New("Creating clients error.")
+	}
+	return nil
 }
 
 // 归还用户
@@ -232,7 +242,7 @@ func (nodeRpc *NodeRpc) connect(ip string, client *rpc.Client) error {
 	}
 	done := make(chan error, 1)
 	go func() {
-		done <- client.Call("DHT.Ping", Null{}, &Null{}) //尝试建立客户端与服务器的连接
+		done <- client.Call(nodeRpc.serveName[0]+".Ping", Null{}, &Null{}) //尝试建立客户端与服务器的连接
 	}()
 	select {
 	case err := <-done:
@@ -254,7 +264,7 @@ func (nodeRpc *NodeRpc) connect(ip string, client *rpc.Client) error {
 	}
 }
 
-func (nodeRpc *NodeRpc) AcceptAndServe() error {
+func (nodeRpc *NodeRpc) Accept() error {
 	conn, err := nodeRpc.listener.Accept()
 	if err != nil {
 		//logrus.Errorf("Building connection error: %v", err)
