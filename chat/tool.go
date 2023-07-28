@@ -41,6 +41,7 @@ var downArrow string
 var leftArrow string
 var rightArrow string
 
+// 得到控制台宽度，便于居中打印
 func setConsoleWidth() error {
 	console := os.Stdout
 	if console == nil {
@@ -56,6 +57,8 @@ func setConsoleWidth() error {
 	consoleWidth = int(ws.Col)
 	return nil
 }
+
+// 初始化一些页面打印组件
 func setStrings() {
 	flushPadding = strings.Repeat("\n", 50) + strings.Repeat("-", consoleWidth) + "\n"
 	separator = "\n" + strings.Repeat("-", consoleWidth) + "\n"
@@ -67,12 +70,14 @@ func setStrings() {
 	rightArrow = fmt.Sprintf("\x1B\x5B\x43")
 }
 
+// 得到hash值
 func getHash(ip string) *big.Int {
 	hash := sha1.Sum([]byte(ip))
 	hashInt := new(big.Int)
 	return hashInt.SetBytes(hash[:])
 }
 
+// 得到随机字符串
 func randString(length int) string {
 	b := make([]rune, length)
 	for i := range b {
@@ -81,11 +86,13 @@ func randString(length int) string {
 	return string(b)
 }
 
+// 得到某时刻下群聊对应的ID
 func getGroupIp(groupSeed string, groupStartTime, sendTime time.Time) string {
-	time := int(sendTime.Sub(groupStartTime).Minutes() / 60.0) //每一小时更换一次id
+	time := int(sendTime.Sub(groupStartTime).Minutes() / groupIdValidTime.Minutes()) //每隔groupIdValidTime更换一次id
 	return groupSeed + strconv.Itoa(time)
 }
 
+// 将json串转换为[]InfoRecord
 func parseToInfoRecord(data string) ([]InfoRecord, error) {
 	infos := []InfoRecord{}
 	parts := strings.Split(data, "\n")
@@ -104,6 +111,7 @@ func parseToInfoRecord(data string) ([]InfoRecord, error) {
 	return infos, nil
 }
 
+// 将[]InfoRecord打印在交互页面上
 func (chatNode *ChatNode) printChatRecords(infos []InfoRecord) {
 	if len(infos) == 0 {
 		return
@@ -126,18 +134,8 @@ func (chatNode *ChatNode) printChatRecords(infos []InfoRecord) {
 	}
 }
 
+// 指定颜色的居中打印
 func PrintCentre(message, colorName string) {
-	fmtColor := seclecColor(colorName)
-	fmtColor.Println(strings.Repeat(" ", (consoleWidth-len(message))/2) + message) //生成填充字符串，加到左侧
-}
-
-func Scan(separator byte) string {
-	reader := bufio.NewReader(os.Stdin)
-	name, _ := reader.ReadString(separator)
-	return strings.TrimRight(name, string(separator))
-}
-
-func seclecColor(colorName string) *color.Color {
 	var fmtColor *color.Color
 	switch colorName {
 	case "blue":
@@ -155,9 +153,17 @@ func seclecColor(colorName string) *color.Color {
 	case "white":
 		fmtColor = white
 	}
-	return fmtColor
+	fmtColor.Println(strings.Repeat(" ", (consoleWidth-len(message))/2) + message) //生成填充字符串，加到左侧
 }
 
+// 读入一行(去除末尾的'\n'及空格)
+func Scan(separator byte) string {
+	reader := bufio.NewReader(os.Stdin)
+	name, _ := reader.ReadString(separator)
+	return strings.TrimRight(name, string(separator))
+}
+
+// 根据输入控制符得到光标位置
 func moveCursor(len, cursorIndex int, control string) int {
 	if control == upArrow {
 		if cursorIndex > 0 {

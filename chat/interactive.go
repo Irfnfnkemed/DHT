@@ -6,6 +6,7 @@ import (
 	"time"
 )
 
+// 主程序
 func Chat() {
 	node := new(ChatNode)
 	PrintCentre("Please type your name:", "yellow")
@@ -21,7 +22,7 @@ func Chat() {
 		if err != nil {
 			PrintCentre(err.Error(), "red")
 		} else {
-			PrintCentre("Successfully log in.", "yellow")
+			PrintCentre("Successfully log in.", "green")
 		}
 	} else {
 		PrintCentre("Please type the node IP (the node is in the P2P chat system):", "yellow")
@@ -30,43 +31,49 @@ func Chat() {
 		if err != nil {
 			PrintCentre(err.Error(), "red")
 		} else {
-			PrintCentre("Successfully log in.", "yellow")
+			PrintCentre("Successfully log in.", "green")
 		}
 	}
 	PrintCentre("Type anything to continue.", "white")
 	Scan('\n')
-	node.Interactive()
-	node.LogOut()
+	if flag {
+		node.interactive()
+		node.LogOut()
+	} else {
+		node.help()
+	}
 }
 
-func (chatNode *ChatNode) Interactive() {
-	next := "HomePage"
+// 交互页面间的状态转移
+func (chatNode *ChatNode) interactive() {
+	next := "homePage"
 	for {
 		switch next {
-		case "HomePage":
-			next = chatNode.HomePage()
-		case "ViewFriendList":
-			next = chatNode.ViewFriendList()
-		case "ViewFriendRequest":
-			next = chatNode.ViewFriendRequest()
-		case "AddNewFriend":
-			next = chatNode.AddNewFriend()
-		case "ViewGroupChatInvitation":
-			next = chatNode.ViewGroupChatInvitation()
-		case "ViewGroupChatList":
-			next = chatNode.ViewGroupChatList()
-		case "Help":
-			next = chatNode.Help()
-		case "Quit":
-			chatNode.Quit()
+		case "homePage":
+			next = chatNode.homePage()
+		case "viewFriendList":
+			next = chatNode.viewFriendList()
+		case "viewGroupChatList":
+			next = chatNode.viewGroupChatList()
+		case "viewFriendRequest":
+			next = chatNode.viewFriendRequest()
+		case "viewGroupChatInvitation":
+			next = chatNode.viewGroupChatInvitation()
+		case "addNewFriend":
+			next = chatNode.addNewFriend()
+		case "help":
+			next = chatNode.help()
+		case "exit":
+			chatNode.exit()
 			return
 		}
 	}
 }
 
-func (chatNode *ChatNode) HomePage() string {
+// 首页
+func (chatNode *ChatNode) homePage() string {
 	cursorIndex := 0
-	consoleCommand := []string{"View friend list", "View group chat list", "View friend request", "View group chat invitation", "Add new friend", "Help", "Quit"}
+	consoleCommand := []string{"View friend list", "View group chat list", "View friend request", "View group chat invitation", "Add new friend", "help", "exit"}
 	for {
 		fmt.Println(flushPadding)
 		PrintCentre(chatNode.name+", welcome to WGJ's P2P chat!", "yellow")
@@ -84,19 +91,19 @@ func (chatNode *ChatNode) HomePage() string {
 		control := Scan('\n')
 		if control == "" {
 			if cursorIndex == 0 {
-				return "ViewFriendList"
+				return "viewFriendList"
 			} else if cursorIndex == 1 {
-				return "ViewGroupChatList"
+				return "viewGroupChatList"
 			} else if cursorIndex == 2 {
-				return "ViewFriendRequest"
+				return "viewFriendRequest"
 			} else if cursorIndex == 3 {
-				return "ViewGroupChatInvitation"
+				return "viewGroupChatInvitation"
 			} else if cursorIndex == 4 {
-				return "AddNewFriend"
+				return "addNewFriend"
 			} else if cursorIndex == 5 {
-				return "Help"
+				return "help"
 			} else if cursorIndex == 6 {
-				return "Quit"
+				return "exit"
 			}
 		} else {
 			cursorIndex = moveCursor(7, cursorIndex, control)
@@ -104,7 +111,8 @@ func (chatNode *ChatNode) HomePage() string {
 	}
 }
 
-func (chatNode *ChatNode) ViewFriendList() string {
+// 查看好友列表
+func (chatNode *ChatNode) viewFriendList() string {
 	friendList := chatNode.GetFriendList()
 	friendCursorIndex := 0
 	friendCursorLen := len(friendList)
@@ -112,7 +120,7 @@ func (chatNode *ChatNode) ViewFriendList() string {
 	selectedFriend := make([]bool, friendCursorLen)
 	selectFriendCursor := false
 	selectedFriendNum := 0
-	consoleCommand := []string{"Invite selected friends to group chat", "Back to home page", "Help"}
+	consoleCommand := []string{"Invite selected friends to group chat", "Back to home page", "help"}
 	for {
 		fmt.Println(flushPadding)
 		yellow.Println("Friend list:")
@@ -246,9 +254,9 @@ func (chatNode *ChatNode) ViewFriendList() string {
 					}
 					continue
 				} else if consoleCursorIndex == 1 {
-					return "HomePage"
+					return "homePage"
 				} else if consoleCursorIndex == 2 {
-					return "Help"
+					return "help"
 				}
 			}
 		}
@@ -271,7 +279,164 @@ func (chatNode *ChatNode) ViewFriendList() string {
 	}
 }
 
-func (chatNode *ChatNode) ViewFriendRequest() string {
+// 查看群聊列表
+func (chatNode *ChatNode) viewGroupChatList() string {
+	flush := true
+	list := []GroupChatRecord{}
+	listTmp := []string{}
+	cursorIndex := 0
+	cursorLen := 0
+	consoleCursorIndex := 0
+	selectGroup := false
+	selectGroupIndex := -1
+	consoleCommand := []string{"Enter the group chat", "Create a new group chat", "Back to home page", "help"}
+	for {
+		if flush {
+			chatNode.groupsLock.RLock()
+			list = list[:0]
+			listTmp = listTmp[:0]
+			for name, groups := range chatNode.groups {
+				for _, group := range groups {
+					list = append(list, group)
+					listTmp = append(listTmp, name)
+				}
+			}
+			chatNode.groupsLock.RUnlock()
+			cursorIndex = 0
+			cursorLen = len(list)
+			consoleCursorIndex = 0
+			selectGroup = false
+			selectGroupIndex = -1
+			flush = false
+		}
+		fmt.Println(flushPadding)
+		PrintCentre("Group chat list:", "yellow")
+		if cursorLen == 0 {
+			PrintCentre("You haven't been in any chat group yet!", "red")
+		} else {
+			for i := 0; i < cursorLen; i++ {
+				if i == cursorIndex {
+					if selectGroup {
+						blue.Print(cursor)
+					} else {
+						fmt.Print(cursor)
+					}
+				} else {
+					fmt.Print(cursorPadding)
+				}
+				if i == selectGroupIndex {
+					green.Print(listTmp[i])
+				} else {
+					yellow.Print(listTmp[i])
+				}
+				fmt.Println(" Started at", list[i].GroupStartTime.Format("2006-01-02 15:04"))
+			}
+		}
+		fmt.Println(separator)
+		PrintCentre("Press up/down arrow to move the cursor.", "magenta")
+		PrintCentre("Press left/right arrow to get the groupList/console cursor.", "magenta")
+		PrintCentre("Press enter to confirm.", "magenta")
+		for i := 0; i < 4; i++ {
+			if i == consoleCursorIndex {
+				if selectGroup {
+					fmt.Print(cursor)
+				} else {
+					blue.Print(cursor)
+				}
+			} else {
+				fmt.Print(cursorPadding)
+			}
+			fmt.Println(consoleCommand[i])
+		}
+		control := Scan('\n')
+		if control == leftArrow {
+			selectGroup = true
+		} else if control == rightArrow {
+			selectGroup = false
+		} else if control == "" {
+			if selectGroup {
+				selectGroupIndex = cursorIndex
+			} else {
+				if consoleCursorIndex == 0 {
+					if cursorLen == 0 || selectGroupIndex == -1 {
+						fmt.Println(flushPadding)
+						PrintCentre("You haven't select any chat group yet!", "red")
+						PrintCentre("Type anything to continue.", "white")
+						Scan('\n')
+					} else {
+						beginTime := time.Now()
+						moreHistoricalMessage := true
+						for {
+							fmt.Println(flushPadding)
+							PrintCentre("Group Chat: "+listTmp[selectGroupIndex], "yellow")
+							if moreHistoricalMessage {
+								PrintCentre("^^^", "blue")
+								PrintCentre("More historical messages", "blue")
+							} else {
+								PrintCentre("No more historical messages", "red")
+							}
+							infos, err := chatNode.GetChatInfo(list[selectGroupIndex], beginTime, time.Now())
+							if err != nil {
+								PrintCentre(err.Error(), "red")
+							} else {
+								chatNode.printChatRecords(infos)
+							}
+							fmt.Println(separator)
+							PrintCentre("Press enter to refresh the chat records.", "magenta")
+							PrintCentre("Press up arrow to get more historical messages.", "magenta")
+							PrintCentre("Press left arrow to return to superior page.", "magenta")
+							PrintCentre("Type messages to chat", "magenta")
+							control := Scan('\n')
+							if control == "" {
+								continue
+							} else if control == leftArrow {
+								flush = true
+								break
+							} else if control == upArrow {
+								earlierTime, err := chatNode.GetEarlierChatInfoTime(list[selectGroupIndex], beginTime)
+								if err == nil {
+									beginTime = earlierTime
+								} else {
+									moreHistoricalMessage = false
+								}
+							} else {
+								err = chatNode.SendChatInfo(control, list[selectGroupIndex])
+								if err != nil {
+									PrintCentre(err.Error(), "red")
+									PrintCentre("Type anything to continue.", "white")
+									Scan('\n')
+								}
+							}
+						}
+					}
+				} else if consoleCursorIndex == 1 {
+					fmt.Println(flushPadding)
+					PrintCentre("Please type new group chat name:", "yellow")
+					name := Scan('\n')
+					chatNode.CreateChatGroup(name)
+					flush = true
+					fmt.Println(flushPadding)
+					PrintCentre("Successfully create the chat group.", "green")
+					PrintCentre("Type anything to continue.", "white")
+					Scan('\n')
+				} else if consoleCursorIndex == 2 {
+					return "homePage"
+				} else if consoleCursorIndex == 3 {
+					return "help"
+				}
+			}
+		} else {
+			if selectGroup {
+				cursorIndex = moveCursor(cursorLen, cursorIndex, control)
+			} else {
+				consoleCursorIndex = moveCursor(4, consoleCursorIndex, control)
+			}
+		}
+	}
+}
+
+// 查看好友请求
+func (chatNode *ChatNode) viewFriendRequest() string {
 	cursorIndex := 0
 	cursorLen := 0
 	consoleCursorIndex := 0
@@ -279,7 +444,7 @@ func (chatNode *ChatNode) ViewFriendRequest() string {
 	selectRequest := false
 	list := []string{}
 	listTmp := []string{}
-	consoleCommand := []string{"Back to home page", "Help"}
+	consoleCommand := []string{"Back to home page", "help"}
 	for {
 		fmt.Println(flushPadding)
 		if status == 0 {
@@ -394,9 +559,9 @@ func (chatNode *ChatNode) ViewFriendRequest() string {
 					}
 				} else {
 					if consoleCursorIndex == 0 {
-						return "HomePage"
+						return "homePage"
 					} else if consoleCursorIndex == 1 {
-						return "Help"
+						return "help"
 					}
 				}
 			}
@@ -444,30 +609,8 @@ func (chatNode *ChatNode) ViewFriendRequest() string {
 	}
 }
 
-func (chatNode *ChatNode) AddNewFriend() string {
-	for {
-		fmt.Println(flushPadding)
-		PrintCentre("Add New friend!", "yellow")
-		fmt.Println(separator)
-		PrintCentre("Type the friend Name.", "magenta")
-		PrintCentre("Press enter to return to the home page.", "magenta")
-		name := Scan('\n')
-		if name == "" {
-			return "HomePage"
-		}
-		err := chatNode.AddFriend(name)
-		fmt.Println(flushPadding)
-		if err != nil {
-			PrintCentre(err.Error(), "red")
-		} else {
-			PrintCentre("Request was sent successfully.", "green")
-		}
-		PrintCentre("Type anything to continue.", "white")
-		Scan('\n')
-	}
-}
-
-func (chatNode *ChatNode) ViewGroupChatInvitation() string {
+// 查看群聊邀请
+func (chatNode *ChatNode) viewGroupChatInvitation() string {
 	list := []InvitationPair{}
 	listTmp := []string{}
 	flush := true
@@ -510,7 +653,7 @@ func (chatNode *ChatNode) ViewGroupChatInvitation() string {
 		PrintCentre("Press left arrow to return to superior page.", "magenta")
 		control := Scan('\n')
 		if control == leftArrow {
-			return "HomePage"
+			return "homePage"
 		} else if control == "" {
 			if cursorLen == 0 {
 				fmt.Println(flushPadding)
@@ -534,155 +677,42 @@ func (chatNode *ChatNode) ViewGroupChatInvitation() string {
 	}
 }
 
-func (chatNode *ChatNode) ViewGroupChatList() string {
-	flush := true
-	list := []GroupChatRecord{}
-	listTmp := []string{}
-	cursorIndex := 0
-	cursorLen := 0
-	consoleCursorIndex := 0
-	selectGroup := false
-	selectGroupIndex := -1
-	consoleCommand := []string{"Enter the group chat", "Create a new group chat", "Back to home page", "Help"}
+// 添加好友
+func (chatNode *ChatNode) addNewFriend() string {
 	for {
-		if flush {
-			chatNode.groupsLock.RLock()
-			list = list[:0]
-			listTmp = listTmp[:0]
-			for name, groups := range chatNode.groups {
-				for _, group := range groups {
-					list = append(list, group)
-					listTmp = append(listTmp, name)
-				}
-			}
-			chatNode.groupsLock.RUnlock()
-			cursorIndex = 0
-			cursorLen = len(list)
-			consoleCursorIndex = 0
-			selectGroup = false
-			selectGroupIndex = -1
-			flush = false
-		}
 		fmt.Println(flushPadding)
-		PrintCentre("Group chat list:", "yellow")
-		if cursorLen == 0 {
-			PrintCentre("You haven't been in any chat group yet!", "red")
-		} else {
-			for i := 0; i < cursorLen; i++ {
-				if i == cursorIndex {
-					if selectGroup {
-						blue.Print(cursor)
-					} else {
-						fmt.Print(cursor)
-					}
-				} else {
-					fmt.Print(cursorPadding)
-				}
-				if i == selectGroupIndex {
-					green.Print(listTmp[i])
-				} else {
-					yellow.Print(listTmp[i])
-				}
-				fmt.Println(" Started at", list[i].GroupStartTime.Format("2006-01-02 15:04"))
-			}
-		}
+		PrintCentre("Add New friend!", "yellow")
 		fmt.Println(separator)
-		PrintCentre("Press up/down arrow to move the cursor.", "magenta")
-		PrintCentre("Press left/right arrow to get the groupList/console cursor.", "magenta")
-		PrintCentre("Press enter to confirm.", "magenta")
-		for i := 0; i < 4; i++ {
-			if i == consoleCursorIndex {
-				if selectGroup {
-					fmt.Print(cursor)
-				} else {
-					blue.Print(cursor)
-				}
-			} else {
-				fmt.Print(cursorPadding)
-			}
-			fmt.Println(consoleCommand[i])
+		PrintCentre("Type the friend Name.", "magenta")
+		PrintCentre("Press enter to return to the home page.", "magenta")
+		name := Scan('\n')
+		if name == "" {
+			return "homePage"
 		}
-		control := Scan('\n')
-		if control == leftArrow {
-			selectGroup = true
-		} else if control == rightArrow {
-			selectGroup = false
-		} else if control == "" {
-			if selectGroup {
-				selectGroupIndex = cursorIndex
-			} else {
-				if consoleCursorIndex == 0 {
-					if cursorLen == 0 || selectGroupIndex == -1 {
-						fmt.Println(flushPadding)
-						PrintCentre("You haven't select any chat group yet!", "red")
-						PrintCentre("Type anything to continue.", "white")
-						Scan('\n')
-					} else {
-						for {
-							fmt.Println(flushPadding)
-							PrintCentre(listTmp[selectGroupIndex], "yellow")
-							infos, err := chatNode.GetChatInfo(list[selectGroupIndex], time.Now())
-							if err != nil {
-								PrintCentre(err.Error(), "red")
-							} else {
-								chatNode.printChatRecords(infos)
-							}
-							fmt.Println(separator)
-							PrintCentre("Press enter to refresh the chat records.", "magenta")
-							PrintCentre("Press left arrow to return to superior page.", "magenta")
-							PrintCentre("Type messages to ", "magenta")
-							control := Scan('\n')
-							if control == "" {
-								continue
-							} else if control == leftArrow {
-								flush = true
-								break
-							} else {
-								err = chatNode.SendChatInfo(control, list[selectGroupIndex])
-								if err != nil {
-									PrintCentre(err.Error(), "red")
-									PrintCentre("Type anything to continue.", "white")
-									Scan('\n')
-								}
-							}
-						}
-					}
-				} else if consoleCursorIndex == 1 {
-					fmt.Println(flushPadding)
-					PrintCentre("Please type new group chat name:", "yellow")
-					name := Scan('\n')
-					chatNode.CreateChatGroup(name)
-					flush = true
-					fmt.Println(flushPadding)
-					PrintCentre("Successfully create the chat group.", "green")
-					PrintCentre("Type anything to continue.", "white")
-					Scan('\n')
-				} else if consoleCursorIndex == 2 {
-					return "HomePage"
-				} else if consoleCursorIndex == 3 {
-					return "Help"
-				}
-			}
+		err := chatNode.SendFriendRequest(name)
+		fmt.Println(flushPadding)
+		if err != nil {
+			PrintCentre(err.Error(), "red")
 		} else {
-			if selectGroup {
-				cursorIndex = moveCursor(cursorLen, cursorIndex, control)
-			} else {
-				consoleCursorIndex = moveCursor(4, consoleCursorIndex, control)
-			}
+			PrintCentre("Request was sent successfully.", "green")
 		}
+		PrintCentre("Type anything to continue.", "white")
+		Scan('\n')
 	}
 }
 
-func (chatNode *ChatNode) Help() string {
+// 帮助
+func (chatNode *ChatNode) help() string {
 	fmt.Println(flushPadding)
 	PrintCentre("To be developed", "red")
 	fmt.Println(separator)
 	PrintCentre("Type anything to return home page.", "magenta")
 	Scan('\n')
-	return "HomePage"
+	return "homePage"
 }
 
-func (chatNode *ChatNode) Quit() {
+// 退出
+func (chatNode *ChatNode) exit() {
 	fmt.Println(flushPadding)
 	PrintCentre("Goodbye!", "yellow")
 }
