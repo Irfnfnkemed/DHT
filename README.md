@@ -2,10 +2,16 @@
 
 ## 文件结构
 ```
+├── chat
+│    ├── chat.go
+│    ├── interactive.go
+│    ├── rpcWrapper.go
+│    └── tool.go
 │─── naive
 │    └── node.go  
 ├── chord
 │    ├── chord.go
+│    ├── data.go
 │    ├── rpcWrapper.go
 │    └── tool.go
 ├── kademlia
@@ -44,15 +50,3 @@
 * [学习材料](doc/tutorial.md)
 
 [报告](doc/report.md)
-
-
-
-## 测试方式：
-输入
-```bash
-go build
-./dht -protocol PROTOCOL_NAME -test TEST_PART 
-```
-其中，`PROTOCOL_NAME`为`naive`/`chord`/`kademlia`，`TEST_PART`为`basic`/`advance`/`all`。
-
-例如 `./dht -protocol kademlia -test all`
