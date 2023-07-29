@@ -17,8 +17,9 @@ func Chat() {
 	PrintCentre("Type Y(y)/N(n):", "yellow")
 	tmp := Scan('\n')
 	flag := (tmp == "Y" || tmp == "y")
+	var err error
 	if flag {
-		err := node.Login(userName, userIp, "")
+		err = node.Login(userName, userIp, "")
 		if err != nil {
 			PrintCentre(err.Error(), "red")
 		} else {
@@ -27,7 +28,7 @@ func Chat() {
 	} else {
 		PrintCentre("Please type the node IP (the node is in the P2P chat system):", "yellow")
 		enterIp := Scan('\n')
-		err := node.Login(userName, userIp, enterIp)
+		err = node.Login(userName, userIp, enterIp)
 		if err != nil {
 			PrintCentre(err.Error(), "red")
 		} else {
@@ -36,7 +37,7 @@ func Chat() {
 	}
 	PrintCentre("Type anything to continue.", "white")
 	Scan('\n')
-	if flag {
+	if err == nil {
 		node.interactive()
 		node.LogOut()
 	} else {
@@ -46,11 +47,11 @@ func Chat() {
 
 // 交互页面间的状态转移
 func (chatNode *ChatNode) interactive() {
-	next := "homePage"
+	next := "homepage"
 	for {
 		switch next {
-		case "homePage":
-			next = chatNode.homePage()
+		case "homepage":
+			next = chatNode.homepage()
 		case "viewFriendList":
 			next = chatNode.viewFriendList()
 		case "viewGroupChatList":
@@ -71,9 +72,10 @@ func (chatNode *ChatNode) interactive() {
 }
 
 // 首页
-func (chatNode *ChatNode) homePage() string {
+func (chatNode *ChatNode) homepage() string {
 	cursorIndex := 0
-	consoleCommand := []string{"View friend list", "View group chat list", "View friend request", "View group chat invitation", "Add new friend", "help", "exit"}
+	consoleCommand := []string{"View friend list", "View group chat list",
+		"View friend request", "View group chat invitation", "Add new friend", "Help", "exit"}
 	for {
 		fmt.Println(flushPadding)
 		PrintCentre(chatNode.name+", welcome to WGJ's P2P chat!", "yellow")
@@ -82,7 +84,7 @@ func (chatNode *ChatNode) homePage() string {
 		PrintCentre("Press enter to confirm.", "magenta")
 		for i := 0; i < 7; i++ {
 			if cursorIndex == i {
-				blue.Print(cursor)
+				cyan.Print(cursor)
 			} else {
 				fmt.Print(cursorPadding)
 			}
@@ -113,14 +115,15 @@ func (chatNode *ChatNode) homePage() string {
 
 // 查看好友列表
 func (chatNode *ChatNode) viewFriendList() string {
-	friendList := chatNode.GetFriendList()
+	friendList, privateChatList := chatNode.GetFriendList()
 	friendCursorIndex := 0
 	friendCursorLen := len(friendList)
 	consoleCursorIndex := 0
 	selectedFriend := make([]bool, friendCursorLen)
 	selectFriendCursor := false
 	selectedFriendNum := 0
-	consoleCommand := []string{"Invite selected friends to group chat", "Back to home page", "help"}
+	consoleCommand := []string{"Invite selected friends to group chat",
+		"Chat privately with selected friends", "Back to homepage", "Help"}
 	for {
 		fmt.Println(flushPadding)
 		yellow.Println("Friend list:")
@@ -130,7 +133,7 @@ func (chatNode *ChatNode) viewFriendList() string {
 			for i, name := range friendList {
 				if i == friendCursorIndex {
 					if selectFriendCursor {
-						blue.Print(cursor)
+						cyan.Print(cursor)
 					} else {
 						fmt.Print(cursor)
 					}
@@ -154,12 +157,12 @@ func (chatNode *ChatNode) viewFriendList() string {
 		PrintCentre("Select friends through friendList cursor.", "magenta")
 		PrintCentre("Press enter to confirm.", "magenta")
 		PrintCentre("Press Tab clear the friends selections.", "magenta")
-		for i := 0; i < 3; i++ {
+		for i := 0; i < 4; i++ {
 			if consoleCursorIndex == i {
 				if selectFriendCursor {
 					fmt.Print(cursor)
 				} else {
-					blue.Print(cursor)
+					cyan.Print(cursor)
 				}
 			} else {
 				fmt.Print(cursorPadding)
@@ -203,7 +206,7 @@ func (chatNode *ChatNode) viewFriendList() string {
 						} else {
 							for i := 0; i < cursorLen; i++ {
 								if i == cursorIndex {
-									blue.Print(cursor)
+									cyan.Print(cursor)
 								} else {
 									fmt.Print(cursorPadding)
 								}
@@ -239,7 +242,7 @@ func (chatNode *ChatNode) viewFriendList() string {
 									if selected {
 										err := chatNode.InviteFriend(friendList[i], listTmp[cursorIndex], list[cursorIndex])
 										if err != nil {
-											PrintCentre(friendList[i]+": "+err.Error(), "red")
+											PrintCentre("Fail to send invitation to "+friendList[i]+": "+err.Error(), "red")
 										} else {
 											PrintCentre("Successfully send invitation to "+friendList[i], "green")
 										}
@@ -252,10 +255,85 @@ func (chatNode *ChatNode) viewFriendList() string {
 							cursorIndex = moveCursor(cursorLen, cursorIndex, control)
 						}
 					}
+					for i := range selectedFriend {
+						selectedFriend[i] = false
+					}
+					selectedFriendNum = 0
+					friendCursorIndex = 0
+					consoleCursorIndex = 0
 					continue
 				} else if consoleCursorIndex == 1 {
-					return "homePage"
+					if selectedFriendNum != 1 {
+						fmt.Println(flushPadding)
+						if selectedFriendNum < 1 {
+							PrintCentre("You haven't selected any friend yet!", "red")
+						} else {
+							PrintCentre("You have selected more than one friend!", "red")
+						}
+						PrintCentre("Type anything to continue.", "white")
+						Scan('\n')
+						continue
+					}
+					friendIndex := 0
+					for i := range selectedFriend {
+						if selectedFriend[i] {
+							friendIndex = i
+							break
+						}
+					}
+					beginTime := time.Now()
+					moreHistoricalMessage := true
+					for {
+						fmt.Println(flushPadding)
+						PrintCentre("Private Chat with: "+friendList[friendIndex], "yellow")
+						if moreHistoricalMessage {
+							PrintCentre("^^^", "cyan")
+							PrintCentre("More historical messages", "cyan")
+						} else {
+							PrintCentre("No more historical messages", "red")
+						}
+						infos, err := chatNode.GetChatInfo(privateChatList[friendIndex], beginTime, time.Now())
+						if err != nil {
+							PrintCentre(err.Error(), "red")
+						} else {
+							chatNode.printChatRecords(infos)
+						}
+						fmt.Println(separator)
+						PrintCentre("Press enter to refresh the chat records.", "magenta")
+						PrintCentre("Press up arrow to get more historical messages.", "magenta")
+						PrintCentre("Press left arrow to return to superior page.", "magenta")
+						PrintCentre("Type messages to chat", "magenta")
+						control := Scan('\n')
+						if control == "" {
+							continue
+						} else if control == leftArrow {
+							break
+						} else if control == upArrow {
+							earlierTime, err := chatNode.GetEarlierChatInfoTime(privateChatList[friendIndex], beginTime)
+							if err == nil {
+								beginTime = earlierTime
+							} else {
+								moreHistoricalMessage = false
+							}
+						} else {
+							err = chatNode.SendChatInfo(control, privateChatList[friendIndex])
+							if err != nil {
+								PrintCentre(err.Error(), "red")
+								PrintCentre("Type anything to continue.", "white")
+								Scan('\n')
+							}
+						}
+					}
+					for i := range selectedFriend {
+						selectedFriend[i] = false
+					}
+					selectedFriendNum = 0
+					friendCursorIndex = 0
+					consoleCursorIndex = 0
+					continue
 				} else if consoleCursorIndex == 2 {
+					return "homepage"
+				} else if consoleCursorIndex == 3 {
 					return "help"
 				}
 			}
@@ -273,7 +351,7 @@ func (chatNode *ChatNode) viewFriendList() string {
 			if selectFriendCursor {
 				friendCursorIndex = moveCursor(friendCursorLen, friendCursorIndex, control)
 			} else {
-				consoleCursorIndex = moveCursor(3, consoleCursorIndex, control)
+				consoleCursorIndex = moveCursor(4, consoleCursorIndex, control)
 			}
 		}
 	}
@@ -289,7 +367,7 @@ func (chatNode *ChatNode) viewGroupChatList() string {
 	consoleCursorIndex := 0
 	selectGroup := false
 	selectGroupIndex := -1
-	consoleCommand := []string{"Enter the group chat", "Create a new group chat", "Back to home page", "help"}
+	consoleCommand := []string{"Enter the group chat", "Create a new group chat", "Back to homepage", "Help"}
 	for {
 		if flush {
 			chatNode.groupsLock.RLock()
@@ -317,7 +395,7 @@ func (chatNode *ChatNode) viewGroupChatList() string {
 			for i := 0; i < cursorLen; i++ {
 				if i == cursorIndex {
 					if selectGroup {
-						blue.Print(cursor)
+						cyan.Print(cursor)
 					} else {
 						fmt.Print(cursor)
 					}
@@ -341,7 +419,7 @@ func (chatNode *ChatNode) viewGroupChatList() string {
 				if selectGroup {
 					fmt.Print(cursor)
 				} else {
-					blue.Print(cursor)
+					cyan.Print(cursor)
 				}
 			} else {
 				fmt.Print(cursorPadding)
@@ -370,8 +448,8 @@ func (chatNode *ChatNode) viewGroupChatList() string {
 							fmt.Println(flushPadding)
 							PrintCentre("Group Chat: "+listTmp[selectGroupIndex], "yellow")
 							if moreHistoricalMessage {
-								PrintCentre("^^^", "blue")
-								PrintCentre("More historical messages", "blue")
+								PrintCentre("^^^", "cyan")
+								PrintCentre("More historical messages", "cyan")
 							} else {
 								PrintCentre("No more historical messages", "red")
 							}
@@ -420,7 +498,7 @@ func (chatNode *ChatNode) viewGroupChatList() string {
 					PrintCentre("Type anything to continue.", "white")
 					Scan('\n')
 				} else if consoleCursorIndex == 2 {
-					return "homePage"
+					return "homepage"
 				} else if consoleCursorIndex == 3 {
 					return "help"
 				}
@@ -444,7 +522,7 @@ func (chatNode *ChatNode) viewFriendRequest() string {
 	selectRequest := false
 	list := []string{}
 	listTmp := []string{}
-	consoleCommand := []string{"Back to home page", "help"}
+	consoleCommand := []string{"Back to homepage", "Help"}
 	for {
 		fmt.Println(flushPadding)
 		if status == 0 {
@@ -464,7 +542,7 @@ func (chatNode *ChatNode) viewFriendRequest() string {
 				for i, name := range list {
 					if i == cursorIndex {
 						if selectRequest {
-							blue.Print(cursor)
+							cyan.Print(cursor)
 						} else {
 							fmt.Print(cursor)
 						}
@@ -482,7 +560,7 @@ func (chatNode *ChatNode) viewFriendRequest() string {
 				for i, name := range list {
 					if i == cursorIndex {
 						if selectRequest {
-							blue.Print(cursor)
+							cyan.Print(cursor)
 						} else {
 							fmt.Print(cursor)
 						}
@@ -511,7 +589,7 @@ func (chatNode *ChatNode) viewFriendRequest() string {
 				if selectRequest {
 					fmt.Print(cursor)
 				} else {
-					blue.Print(cursor)
+					cyan.Print(cursor)
 				}
 			} else {
 				fmt.Print(cursorPadding)
@@ -559,7 +637,7 @@ func (chatNode *ChatNode) viewFriendRequest() string {
 					}
 				} else {
 					if consoleCursorIndex == 0 {
-						return "homePage"
+						return "homepage"
 					} else if consoleCursorIndex == 1 {
 						return "help"
 					}
@@ -639,7 +717,7 @@ func (chatNode *ChatNode) viewGroupChatInvitation() string {
 			PrintCentre("You have "+strconv.Itoa(cursorLen)+" invitations to confirm.", "yellow")
 			for i := 0; i < cursorLen; i++ {
 				if i == cursorIndex {
-					blue.Print(cursor)
+					cyan.Print(cursor)
 				} else {
 					fmt.Print(cursorPadding)
 				}
@@ -653,7 +731,7 @@ func (chatNode *ChatNode) viewGroupChatInvitation() string {
 		PrintCentre("Press left arrow to return to superior page.", "magenta")
 		control := Scan('\n')
 		if control == leftArrow {
-			return "homePage"
+			return "homepage"
 		} else if control == "" {
 			if cursorLen == 0 {
 				fmt.Println(flushPadding)
@@ -684,10 +762,10 @@ func (chatNode *ChatNode) addNewFriend() string {
 		PrintCentre("Add New friend!", "yellow")
 		fmt.Println(separator)
 		PrintCentre("Type the friend Name.", "magenta")
-		PrintCentre("Press enter to return to the home page.", "magenta")
+		PrintCentre("Press enter to return to the homepage.", "magenta")
 		name := Scan('\n')
 		if name == "" {
-			return "homePage"
+			return "homepage"
 		}
 		err := chatNode.SendFriendRequest(name)
 		fmt.Println(flushPadding)
@@ -703,12 +781,81 @@ func (chatNode *ChatNode) addNewFriend() string {
 
 // 帮助
 func (chatNode *ChatNode) help() string {
-	fmt.Println(flushPadding)
-	PrintCentre("To be developed", "red")
-	fmt.Println(separator)
-	PrintCentre("Type anything to return home page.", "magenta")
-	Scan('\n')
-	return "homePage"
+	cursorIndex := 0
+	consoleCommand := []string{"How to login?", "How to add new friend?",
+		"How to create a new chat group?", "How to invite my friends to chat group?",
+		"Return to homepage"}
+	for {
+		fmt.Println(flushPadding)
+		PrintCentre("How can I help you?", "yellow")
+		fmt.Println(separator)
+		PrintCentre("Press up/down arrow to move the cursor.", "magenta")
+		PrintCentre("Press enter to confirm.", "magenta")
+		for i := 0; i < 5; i++ {
+			if i == cursorIndex {
+				cyan.Print(cursor)
+			} else {
+				fmt.Print(cursorPadding)
+			}
+			fmt.Println(consoleCommand[i])
+		}
+		control := Scan('\n')
+		if control == "" {
+			if cursorIndex == 0 {
+				fmt.Println(flushPadding)
+				yellow.Println("To login, you need type in your name and IP first.")
+				yellow.Println("If you want to join in an existed P2P system, you need to type in the IP of a node that is currently online in that system." +
+					" If you just want to create a new P2P system, you needn't do that.")
+				red.Println("! The user name cannot be repeated. If you type in a name that is existed, you will get error message and you should type in a new name.")
+			} else if cursorIndex == 1 {
+				fmt.Println(flushPadding)
+				yellow.Print("To add a new friend, you should go to ")
+				green.Print("homepage -> Add new friend")
+				yellow.Print(".\nType in the name of the user you want to add as your friend. The requset will be sent to the user, and you can view its status in ")
+				green.Print("homepage -> View friend request")
+				yellow.Println(".")
+				red.Println("! You cannot send request to the user which is not existed.")
+				red.Println("! You cannot send request to yourself.")
+				red.Println("! You cannot send request to your friend.")
+				red.Println("! You cannot send request to the user which you have sent request already. You should wait that user to confirm your request.")
+				red.Print("! You cannot send request to the user which you have already received the request from that user. You should go to ")
+				magenta.Print("homepage -> View friend request")
+				red.Println(" to check your friend request list.")
+			} else if cursorIndex == 2 {
+				fmt.Println(flushPadding)
+				yellow.Println("You can create a new chat group in two ways:")
+				yellow.Print("1. Go to ")
+				green.Print("homepage -> View group chat list -> Create a new group chat")
+				yellow.Println(", than type in the new chat group name.")
+				yellow.Print("2. Go to ")
+				green.Print("homepage -> View friend list ->Invite selected friends to group chat")
+				yellow.Println(", than press right arrow, typing in the new chat group name.")
+				blue.Println("* The name of chat group can be repeated.")
+			} else if cursorIndex == 3 {
+				fmt.Println(flushPadding)
+				yellow.Print("To invite friends to chat group, you should go to ")
+				green.Print("homepage -> View friend list")
+				yellow.Println(", than pressing left arrow to shift cursor to friendList area.")
+				yellow.Println("You can select the friends you want to invite by moving cursor on his/her name and press enter. " +
+					"The name of selected friends will turn to green. You can clear your selection by pressing tab.")
+				yellow.Print("After selection, press right arrow to shift cursor to console area. Go to ")
+				green.Print("Invite selected friends to group chat")
+				yellow.Println(". Move the cursor to the name of the group chat which you want to invite your friends in, than pressing enter to confirm. " +
+					"If you haven't had any chat group yet, ypu can also press right arrow to create a new one.")
+				yellow.Println("Then the console will display the invitation sending status.")
+				blue.Println("* The friend you send invitation to will enter the chat group after he/she confirm the invitation.")
+				red.Println("! If you don't select any friends, you will get error message, and you need to select again.")
+				red.Println("! If you don't have any chat group and try to press enter, you will get error message. You need to creat a new group first.")
+				red.Println("! You cannot send invitation to the friend which has been in the group already.")
+			} else if cursorIndex == 4 {
+				return "homepage"
+			}
+			fmt.Println("Type anything to return to superior page.")
+			Scan('\n')
+		} else {
+			cursorIndex = moveCursor(5, cursorIndex, control)
+		}
+	}
 }
 
 // 退出

@@ -1,13 +1,10 @@
 package chat
 
 import (
-	"bufio"
 	"dht/chord"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
-	"strings"
 	"sync"
 	"time"
 )
@@ -17,7 +14,8 @@ const groupIdValidTime = 5 * time.Minute
 type ChatNode struct {
 	node                  *chord.Node
 	name                  string
-	friendList            map[string]string //名字->ip
+	friendList            map[string]string          //名字->ip
+	friendPrivateChat     map[string]GroupChatRecord // 名字->私聊信息
 	friendLock            sync.RWMutex
 	groups                map[string]([]GroupChatRecord) //名字->群聊信息
 	groupsLock            sync.RWMutex
@@ -48,8 +46,10 @@ type NamePair struct {
 }
 
 type SendBackPair struct {
-	FromName string
-	Agree    bool
+	Agree         bool
+	FromName      string
+	ChatSeed      string
+	ChatStartTime time.Time
 }
 
 type InvitationPair struct {
@@ -75,6 +75,7 @@ func (chatNode *ChatNode) Login(name, ip, knownIp string) error {
 	chatNode.start = make(chan bool, 1)
 	chatNode.quit = make(chan bool, 1)
 	chatNode.friendList = make(map[string]string)
+	chatNode.friendPrivateChat = make(map[string]GroupChatRecord)
 	chatNode.groups = make(map[string][]GroupChatRecord)
 	chatNode.friendRequest = make(map[string]Null)
 	chatNode.invitation = make(map[string][]InvitationPair)
@@ -94,13 +95,14 @@ func (chatNode *ChatNode) Login(name, ip, knownIp string) error {
 		}
 	}
 	chatNode.node.RPC.Register("Chat", &RPCWrapper{chatNode})
+	time.Sleep(500 * time.Millisecond) //使得数据转移
 	for true {
 		ok, _ := chatNode.node.Get(name)
 		if ok {
-			fmt.Println("Name existed, please change a new one.\nType: ")
-			reader := bufio.NewReader(os.Stdin)
-			name, _ = reader.ReadString('\n')
-			name = strings.TrimRight(name, "\n")
+			PrintCentre("Name existed, please change a new one.", "red")
+			PrintCentre("Type:", "yellow")
+			name = Scan('\n')
+			chatNode.name = name
 		} else {
 			break
 		}
@@ -173,13 +175,16 @@ func (chatNode *ChatNode) CheckFriendRequest(friendName string, agree bool) erro
 	if !ok {
 		return errors.New("Get IP error.")
 	}
-	err := chatNode.node.RPC.RemoteCall(friendIp, "Chat.SendBackFriendRequest", SendBackPair{chatNode.name, agree}, &Null{})
+	privateChat := GroupChatRecord{time.Now(), randString(60)}
+	err := chatNode.node.RPC.RemoteCall(friendIp, "Chat.SendBackFriendRequest",
+		SendBackPair{agree, chatNode.name, privateChat.GroupSeed, privateChat.GroupStartTime}, &Null{})
 	if err != nil {
 		return err
 	}
 	if agree {
 		chatNode.friendLock.Lock()
 		chatNode.friendList[friendName] = friendIp
+		chatNode.friendPrivateChat[friendName] = privateChat
 		chatNode.friendLock.Unlock()
 	}
 	return nil
@@ -201,21 +206,24 @@ func (chatNode *ChatNode) SendBackFriendRequest(pair SendBackPair) error {
 	if pair.Agree {
 		chatNode.friendLock.Lock()
 		chatNode.friendList[pair.FromName] = friendIp
+		chatNode.friendPrivateChat[pair.FromName] = GroupChatRecord{pair.ChatStartTime, pair.ChatSeed}
 		chatNode.friendLock.Unlock()
 		return nil
 	}
 	return errors.New("Request was rejeceted.")
 }
 
-// 得到好友列表
-func (chatNode *ChatNode) GetFriendList() []string {
+// 得到好友列表和私聊列表
+func (chatNode *ChatNode) GetFriendList() ([]string, []GroupChatRecord) {
 	friendList := []string{}
+	privateChatList := []GroupChatRecord{}
 	chatNode.friendLock.RLock()
 	defer chatNode.friendLock.RUnlock()
 	for name := range chatNode.friendList {
 		friendList = append(friendList, name)
+		privateChatList = append(privateChatList, chatNode.friendPrivateChat[name])
 	}
-	return friendList
+	return friendList, privateChatList
 }
 
 // 删除已发送的好友请求记录
