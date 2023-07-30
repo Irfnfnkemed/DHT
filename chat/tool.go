@@ -207,3 +207,11 @@ func getSelection() bool {
 		}
 	}
 }
+
+func printLogo() {
+	PrintCentre("__         __", "yellow")
+	PrintCentre("/ /___   ___\\ \\", "yellow")
+	PrintCentre("/  ___/   \\___  \\", "yellow")
+	PrintCentre("/_____/     \\_____\\", "yellow")
+	fmt.Print("\n")
+}

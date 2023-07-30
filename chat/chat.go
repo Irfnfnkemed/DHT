@@ -10,24 +10,24 @@ import (
 )
 
 const groupIdValidTime = 5 * time.Minute
+const trySendCircle = 5 * time.Second
 
 type ChatNode struct {
 	node                  *chord.Node
 	name                  string
 	password              string
 	accountSeed           string
-	friendList            map[string]string          //名字->ip
-	friendPrivateChat     map[string]GroupChatRecord // 名字->私聊信息
+	friendList            map[string]GroupChatRecord // 名字->私聊信息
 	friendLock            sync.RWMutex
 	groups                map[string]([]GroupChatRecord) //名字->群聊信息
 	groupsLock            sync.RWMutex
-	friendRequest         map[string]Null
+	friendRequest         map[string]SendBackPair
 	friendRequestLock     sync.RWMutex
 	sentFriendRequest     map[string]string
 	sentFriendRequestLock sync.RWMutex
 	invitation            map[string]([]InvitationPair)
 	invitationLock        sync.RWMutex
-	putModeLock           sync.Mutex
+	online                bool
 }
 
 type AccountRecord struct {
@@ -37,10 +37,9 @@ type AccountRecord struct {
 }
 
 type ChatNodeRecord struct {
-	FriendList        map[string]string
-	FriendPrivateChat map[string]GroupChatRecord
+	FriendList        map[string]GroupChatRecord
 	Groups            map[string]([]GroupChatRecord)
-	FriendRequest     map[string]Null
+	FriendRequest     map[string]SendBackPair
 	SentFriendRequest map[string]string
 	Invitation        map[string]([]InvitationPair)
 }
@@ -51,9 +50,9 @@ type GroupChatRecord struct {
 }
 
 type InfoRecord struct {
-	FromName string    `json:"FromName"`
-	SendTime time.Time `json:"SendTime"`
-	Info     string    `json:"Info"`
+	FromName string
+	SendTime time.Time
+	Info     string
 }
 
 type NamePair struct {
@@ -98,10 +97,9 @@ func (chatNode *ChatNode) Login(name, ip, password, knownIp string, register boo
 		chatNode.name = name
 		chatNode.password = password
 		chatNode.accountSeed = randString(60)
-		chatNode.friendList = make(map[string]string)
-		chatNode.friendPrivateChat = make(map[string]GroupChatRecord)
+		chatNode.friendList = make(map[string]GroupChatRecord)
 		chatNode.groups = make(map[string][]GroupChatRecord)
-		chatNode.friendRequest = make(map[string]Null)
+		chatNode.friendRequest = make(map[string]SendBackPair)
 		chatNode.invitation = make(map[string][]InvitationPair)
 		chatNode.sentFriendRequest = make(map[string]string)
 	}
@@ -173,7 +171,6 @@ func (chatNode *ChatNode) Login(name, ip, password, knownIp string, register boo
 				}
 				chatNode.password = password
 				chatNode.friendList = chatNodeRecord.FriendList
-				chatNode.friendPrivateChat = chatNodeRecord.FriendPrivateChat
 				chatNode.groups = chatNodeRecord.Groups
 				chatNode.friendRequest = chatNodeRecord.FriendRequest
 				chatNode.invitation = chatNodeRecord.Invitation
@@ -192,18 +189,21 @@ func (chatNode *ChatNode) Login(name, ip, password, knownIp string, register boo
 		chatNode.node.Quit()
 		return errors.New("Account put error.")
 	}
+	chatNode.online = true
+	chatNode.RestartSendTry()
 	return nil
 }
 
 // 登出
 func (chatNode *ChatNode) LogOut() {
+	chatNode.online = false
 	jsonInfo, _ := json.Marshal(AccountRecord{false, chatNode.node.IP, chatNode.accountSeed})
 	ok := chatNode.node.Put(chatNode.name, string(jsonInfo))
 	if !ok {
 		PrintCentre("Save account error!", "red")
 	}
-	jsonInfo, _ = json.Marshal(ChatNodeRecord{chatNode.friendList, chatNode.friendPrivateChat,
-		chatNode.groups, chatNode.friendRequest, chatNode.sentFriendRequest, chatNode.invitation})
+	jsonInfo, _ = json.Marshal(ChatNodeRecord{chatNode.friendList, chatNode.groups,
+		chatNode.friendRequest, chatNode.sentFriendRequest, chatNode.invitation})
 	ok = chatNode.node.Put(chatNode.accountSeed+chatNode.password, string(jsonInfo))
 	if !ok {
 		PrintCentre("Save account error!", "red")
@@ -218,7 +218,7 @@ func (chatNode *ChatNode) SendFriendRequest(friendName string) error {
 		return errors.New("Cannot add myself as friend.")
 	}
 	chatNode.friendLock.RLock()
-	friendIp, ok := chatNode.friendList[friendName]
+	_, ok := chatNode.friendList[friendName]
 	chatNode.friendLock.RUnlock()
 	if ok {
 		return errors.New("The user has been your friend.")
@@ -230,29 +230,19 @@ func (chatNode *ChatNode) SendFriendRequest(friendName string) error {
 		return errors.New("You have received the request from this user. Please confirm the friend request.")
 	}
 	chatNode.sentFriendRequestLock.RLock()
-	friendIp, ok = chatNode.sentFriendRequest[friendName]
+	status, ok := chatNode.sentFriendRequest[friendName]
 	chatNode.sentFriendRequestLock.RUnlock()
-	if ok && friendIp != "Accepted" && friendIp != "Rejected" {
+	if ok && status != "Accepted" && status != "Rejected" {
 		return errors.New("You have sent the request to this user. Please wait friend to confirm.")
 	}
-	friendIp, _, err := chatNode.getUserAccount(friendName)
-	if err != nil {
-		return err
-	}
-	err = chatNode.node.RPC.RemoteCall(friendIp, "Chat.AcceptFriendRequest", chatNode.name, &Null{})
-	if err != nil {
-		return err
-	}
-	chatNode.sentFriendRequestLock.Lock()
-	chatNode.sentFriendRequest[friendName] = friendIp
-	chatNode.sentFriendRequestLock.Unlock()
+	go chatNode.TrySendFriendRequest(friendName)
 	return nil
 }
 
 // 接收好友请求，存入待确认列表
 func (chatNode *ChatNode) AcceptFriendRequest(friendName string) {
 	chatNode.friendRequestLock.Lock()
-	chatNode.friendRequest[friendName] = Null{}
+	chatNode.friendRequest[friendName] = SendBackPair{} //结构体空值，表示尚未确认
 	chatNode.friendRequestLock.Unlock()
 }
 
@@ -261,20 +251,11 @@ func (chatNode *ChatNode) CheckFriendRequest(friendName string, agree bool) erro
 	chatNode.friendRequestLock.Lock()
 	delete(chatNode.friendRequest, friendName)
 	chatNode.friendRequestLock.Unlock()
-	friendIp, _, err := chatNode.getUserAccount(friendName)
-	if err != nil {
-		return err
-	}
 	privateChat := GroupChatRecord{time.Now(), randString(60)}
-	err = chatNode.node.RPC.RemoteCall(friendIp, "Chat.SendBackFriendRequest",
-		SendBackPair{agree, chatNode.name, privateChat.GroupSeed, privateChat.GroupStartTime}, &Null{})
-	if err != nil {
-		return err
-	}
+	go chatNode.TrySendBackFriendRequest(friendName, SendBackPair{agree, chatNode.name, privateChat.GroupSeed, privateChat.GroupStartTime})
 	if agree {
 		chatNode.friendLock.Lock()
-		chatNode.friendList[friendName] = friendIp
-		chatNode.friendPrivateChat[friendName] = privateChat
+		chatNode.friendList[friendName] = privateChat
 		chatNode.friendLock.Unlock()
 	}
 	return nil
@@ -282,7 +263,9 @@ func (chatNode *ChatNode) CheckFriendRequest(friendName string, agree bool) erro
 
 // 向好友请求发起者返回自己对请求的确认结果
 func (chatNode *ChatNode) SendBackFriendRequest(pair SendBackPair) error {
-	friendIp, ok := chatNode.sentFriendRequest[pair.FromName]
+	chatNode.sentFriendRequestLock.RLock()
+	_, ok := chatNode.sentFriendRequest[pair.FromName]
+	chatNode.sentFriendRequestLock.RUnlock()
 	if !ok {
 		return errors.New("Sent friend request error.")
 	}
@@ -295,8 +278,7 @@ func (chatNode *ChatNode) SendBackFriendRequest(pair SendBackPair) error {
 	chatNode.sentFriendRequestLock.Unlock()
 	if pair.Agree {
 		chatNode.friendLock.Lock()
-		chatNode.friendList[pair.FromName] = friendIp
-		chatNode.friendPrivateChat[pair.FromName] = GroupChatRecord{pair.ChatStartTime, pair.ChatSeed}
+		chatNode.friendList[pair.FromName] = GroupChatRecord{pair.ChatStartTime, pair.ChatSeed}
 		chatNode.friendLock.Unlock()
 		return nil
 	}
@@ -309,9 +291,9 @@ func (chatNode *ChatNode) GetFriendList() ([]string, []GroupChatRecord) {
 	privateChatList := []GroupChatRecord{}
 	chatNode.friendLock.RLock()
 	defer chatNode.friendLock.RUnlock()
-	for name := range chatNode.friendList {
+	for name, privateChat := range chatNode.friendList {
 		friendList = append(friendList, name)
-		privateChatList = append(privateChatList, chatNode.friendPrivateChat[name])
+		privateChatList = append(privateChatList, privateChat)
 	}
 	return friendList, privateChatList
 }
@@ -341,12 +323,16 @@ func (chatNode *ChatNode) CreateChatGroup(groupChatName string) {
 // 邀请好友加入群聊
 func (chatNode *ChatNode) InviteFriend(friendName, groupChatName string, groupChat GroupChatRecord) error {
 	chatNode.friendLock.RLock()
-	ip, ok := chatNode.friendList[friendName]
+	_, ok := chatNode.friendList[friendName]
 	chatNode.friendLock.RUnlock()
 	if !ok {
 		return errors.New("Not existed friend.")
 	}
-	err := chatNode.node.RPC.RemoteCall(ip, "Chat.AcceptInvitation",
+	friendIp, _, err := chatNode.getUserAccount(friendName)
+	if err != nil {
+		return errors.New("Get friend IP error.")
+	}
+	err = chatNode.node.RPC.RemoteCall(friendIp, "Chat.AcceptInvitation",
 		InvitationPair{chatNode.name, friendName, groupChatName, groupChat.GroupSeed, groupChat.GroupStartTime}, &Null{})
 	if err != nil {
 		return err
@@ -450,12 +436,71 @@ func (chatNode *ChatNode) GetEarlierChatInfoTime(groupChat GroupChatRecord, begi
 	return time.Time{}, errors.New("No more records.")
 }
 
-// func (chatNode *ChatNode) Put(key string, info []byte, control string) bool {
-// 	fmt.Println(string(info))
-// 	chatNode.putModeLock.Lock()
-// 	chord.Setmode(control)
-// 	ok := chatNode.node.Put(key, string(info))
-// 	chord.Setmode("overwrite")
-// 	chatNode.putModeLock.Unlock()
-// 	return ok
-// }
+// 不断尝试发送好友请求，直至接收
+func (chatNode *ChatNode) TrySendFriendRequest(friendName string) {
+	chatNode.sentFriendRequestLock.Lock()
+	chatNode.sentFriendRequest[friendName] = "Pending"
+	chatNode.sentFriendRequestLock.Unlock()
+	for chatNode.online {
+		friendIp, _, err := chatNode.getUserAccount(friendName)
+		if err != nil {
+			time.Sleep(trySendCircle)
+			continue
+		}
+		err = chatNode.node.RPC.RemoteCall(friendIp, "Chat.AcceptFriendRequest", chatNode.name, &Null{})
+		if err == nil {
+			chatNode.sentFriendRequestLock.Lock()
+			chatNode.sentFriendRequest[friendName] = "To be confirmed"
+			chatNode.sentFriendRequestLock.Unlock()
+			return
+		}
+		time.Sleep(trySendCircle)
+	}
+}
+
+// 不断尝试发送好友请求确认情况，直至接收
+func (chatNode *ChatNode) TrySendBackFriendRequest(friendName string, pair SendBackPair) {
+	chatNode.friendRequestLock.Lock()
+	chatNode.friendRequest[friendName] = pair //表示已经确认，但对方还未接收
+	chatNode.friendRequestLock.Unlock()
+	for chatNode.online {
+		friendIp, _, err := chatNode.getUserAccount(friendName)
+		if err != nil {
+			time.Sleep(trySendCircle)
+			continue
+		}
+		err = chatNode.node.RPC.RemoteCall(friendIp, "Chat.SendBackFriendRequest", pair, &Null{})
+		if err == nil {
+			chatNode.friendRequestLock.Lock()
+			delete(chatNode.friendRequest, friendName)
+			chatNode.friendRequestLock.Unlock()
+			return
+		}
+		time.Sleep(trySendCircle)
+	}
+}
+
+func (chatNode *ChatNode) RestartSendTry() {
+	sendList := []string{}
+	chatNode.sentFriendRequestLock.RLock()
+	for name, status := range chatNode.sentFriendRequest {
+		if status == "Pending" {
+			sendList = append(sendList, name)
+		}
+	}
+	chatNode.sentFriendRequestLock.RUnlock()
+	for _, name := range sendList {
+		go chatNode.TrySendFriendRequest(name)
+	}
+	sendBackList := make(map[string]SendBackPair)
+	chatNode.friendRequestLock.RLock()
+	for name, sendBack := range chatNode.friendRequest {
+		if sendBack.ChatSeed != "" {
+			sendBackList[name] = sendBack
+		}
+	}
+	chatNode.friendRequestLock.RUnlock()
+	for name, sendBack := range sendBackList {
+		go chatNode.TrySendBackFriendRequest(name, sendBack)
+	}
+}

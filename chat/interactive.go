@@ -8,38 +8,67 @@ import (
 
 // 主程序
 func Chat() {
-	PrintCentre("Create a new account/Login the existed account?", "yellow")
-	PrintCentre("Type Y(y)/N(n):", "yellow")
-	register := getSelection()
-	PrintCentre("Please type your name:", "yellow")
-	userName := Scan('\n')
-	PrintCentre("Please type your IP:", "yellow")
-	userIp := Scan('\n')
-	PrintCentre("Please type your password:", "yellow")
-	password := Scan('\n')
-	create := false
-	if register {
-		PrintCentre("Creat/Join?", "yellow")
-		PrintCentre("Type Y(y)/N(n):", "yellow")
-		create = getSelection()
-	}
 	var err error
 	node := new(ChatNode)
-	if create {
-		err = node.Login(userName, userIp, password, "", register)
-		if err != nil {
-			PrintCentre(err.Error(), "red")
-		} else {
-			PrintCentre("Successfully log in.", "green")
+	cursorIndex := 0
+	consoleCommand := []string{"Login to an existing account", "Register a new account", "Help", "About"}
+	userName := ""
+	userIp := ""
+	password := ""
+	enterIp := ""
+	create := false
+	for {
+		fmt.Println(flushPadding)
+		printLogo()
+		PrintCentre("Welcome to WGJ's P2P chat!", "yellow")
+		for i := 0; i < 4; i++ {
+			if i == cursorIndex {
+				blue.Print(cursor)
+			} else {
+				fmt.Print(cursorPadding)
+			}
+			fmt.Println(consoleCommand[i])
 		}
-	} else {
-		PrintCentre("Please type the node IP (the node is in the P2P chat system):", "yellow")
-		enterIp := Scan('\n')
-		err = node.Login(userName, userIp, password, enterIp, register)
-		if err != nil {
-			PrintCentre(err.Error(), "red")
+		fmt.Println(separator)
+		PrintCentre("Press up/down arrow to move the cursor.", "magenta")
+		PrintCentre("Press enter to confirm.", "magenta")
+		control := Scan('\n')
+		if control == "" {
+			if cursorIndex == 0 || cursorIndex == 1 {
+				PrintCentre("Please type your name:", "yellow")
+				userName = Scan('\n')
+				PrintCentre("Please type your IP:", "yellow")
+				userIp = Scan('\n')
+				PrintCentre("Please type your password:", "yellow")
+				password = Scan('\n')
+				if cursorIndex == 1 {
+					PrintCentre("Do you want to create a new P2P net?", "yellow")
+					PrintCentre("Type Y(y)/N(n):", "yellow")
+					create = getSelection()
+				}
+				if !create {
+					PrintCentre("Please type the node IP (the online node is in the P2P chat net):", "yellow")
+					enterIp = Scan('\n')
+				}
+				err = node.Login(userName, userIp, password, enterIp, cursorIndex == 1)
+				if err != nil {
+					PrintCentre(err.Error(), "red")
+				} else {
+					PrintCentre("Successfully log in.", "green")
+				}
+				break
+			} else if cursorIndex == 2 {
+				node.help()
+			} else if cursorIndex == 3 {
+				fmt.Println(flushPadding)
+				yellow.Println("This chat program is developed by WGJ during PPCA 2023.")
+				yellow.Println("The chat program is an interesting application of distributed hash table.")
+				yellow.Println("This chat program is based on chord protocol.")
+				fmt.Println("Type anything to continue.")
+				Scan('\n')
+			}
 		} else {
-			PrintCentre("Successfully log in.", "green")
+			cursorIndex = moveCursor(4, cursorIndex, control)
 		}
 	}
 	PrintCentre("Type anything to continue.", "white")
@@ -69,8 +98,6 @@ func (chatNode *ChatNode) interactive() {
 			next = chatNode.viewGroupChatInvitation()
 		case "addNewFriend":
 			next = chatNode.addNewFriend()
-		case "help":
-			next = chatNode.help()
 		case "exit":
 			chatNode.exit()
 			return
@@ -82,7 +109,7 @@ func (chatNode *ChatNode) interactive() {
 func (chatNode *ChatNode) homepage() string {
 	cursorIndex := 0
 	consoleCommand := []string{"View friend list", "View group chat list",
-		"View friend request", "View group chat invitation", "Add new friend", "Help", "exit"}
+		"View friend request", "View group chat invitation", "Add new friend", "Help", "Exit"}
 	for {
 		fmt.Println(flushPadding)
 		PrintCentre(chatNode.name+", welcome to WGJ's P2P chat!", "yellow")
@@ -110,7 +137,7 @@ func (chatNode *ChatNode) homepage() string {
 			} else if cursorIndex == 4 {
 				return "addNewFriend"
 			} else if cursorIndex == 5 {
-				return "help"
+				chatNode.help()
 			} else if cursorIndex == 6 {
 				return "exit"
 			}
@@ -343,7 +370,7 @@ func (chatNode *ChatNode) viewFriendList() string {
 				} else if consoleCursorIndex == 2 {
 					return "homepage"
 				} else if consoleCursorIndex == 3 {
-					return "help"
+					chatNode.help()
 				}
 			}
 		}
@@ -509,7 +536,7 @@ func (chatNode *ChatNode) viewGroupChatList() string {
 				} else if consoleCursorIndex == 2 {
 					return "homepage"
 				} else if consoleCursorIndex == 3 {
-					return "help"
+					chatNode.help()
 				}
 			}
 		} else {
@@ -648,7 +675,7 @@ func (chatNode *ChatNode) viewFriendRequest() string {
 					if consoleCursorIndex == 0 {
 						return "homepage"
 					} else if consoleCursorIndex == 1 {
-						return "help"
+						chatNode.help()
 					}
 				}
 			}
@@ -657,8 +684,10 @@ func (chatNode *ChatNode) viewFriendRequest() string {
 					(control == string('\t') && (status == 0 || status == 2)) {
 					chatNode.friendRequestLock.RLock()
 					list = list[:0]
-					for name := range chatNode.friendRequest {
-						list = append(list, name)
+					for name, sent := range chatNode.friendRequest {
+						if sent.ChatSeed == "" {
+							list = append(list, name)
+						}
 					}
 					chatNode.friendRequestLock.RUnlock()
 					cursorIndex = 0
@@ -793,7 +822,7 @@ func (chatNode *ChatNode) help() string {
 	cursorIndex := 0
 	consoleCommand := []string{"How to login?", "How to add new friend?",
 		"How to create a new chat group?", "How to invite my friends to chat group?",
-		"Return to homepage"}
+		"Return to superior page"}
 	for {
 		fmt.Println(flushPadding)
 		PrintCentre("How can I help you?", "yellow")
