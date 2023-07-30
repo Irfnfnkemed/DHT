@@ -14,6 +14,8 @@ const groupIdValidTime = 5 * time.Minute
 type ChatNode struct {
 	node                  *chord.Node
 	name                  string
+	password              string
+	accountSeed           string
 	friendList            map[string]string          //名字->ip
 	friendPrivateChat     map[string]GroupChatRecord // 名字->私聊信息
 	friendLock            sync.RWMutex
@@ -25,8 +27,22 @@ type ChatNode struct {
 	sentFriendRequestLock sync.RWMutex
 	invitation            map[string]([]InvitationPair)
 	invitationLock        sync.RWMutex
-	start                 chan bool
-	quit                  chan bool
+	putModeLock           sync.Mutex
+}
+
+type AccountRecord struct {
+	Online      bool
+	IP          string
+	AccountSeed string
+}
+
+type ChatNodeRecord struct {
+	FriendList        map[string]string
+	FriendPrivateChat map[string]GroupChatRecord
+	Groups            map[string]([]GroupChatRecord)
+	FriendRequest     map[string]Null
+	SentFriendRequest map[string]string
+	Invitation        map[string]([]InvitationPair)
 }
 
 type GroupChatRecord struct {
@@ -70,55 +86,129 @@ func init() {
 }
 
 // 登录
-func (chatNode *ChatNode) Login(name, ip, knownIp string) error {
-	chatNode.name = name
-	chatNode.start = make(chan bool, 1)
-	chatNode.quit = make(chan bool, 1)
-	chatNode.friendList = make(map[string]string)
-	chatNode.friendPrivateChat = make(map[string]GroupChatRecord)
-	chatNode.groups = make(map[string][]GroupChatRecord)
-	chatNode.friendRequest = make(map[string]Null)
-	chatNode.invitation = make(map[string][]InvitationPair)
-	chatNode.sentFriendRequest = make(map[string]string)
+func (chatNode *ChatNode) Login(name, ip, password, knownIp string, register bool) error {
 	chatNode.node = new(chord.Node)
 	ok := chatNode.node.Init(ip)
 	if !ok {
 		return errors.New("Init error.")
 	}
 	chatNode.node.Run()
+	chatNode.node.RPC.Register("Chat", &RPCWrapper{chatNode})
+	if register {
+		chatNode.name = name
+		chatNode.password = password
+		chatNode.accountSeed = randString(60)
+		chatNode.friendList = make(map[string]string)
+		chatNode.friendPrivateChat = make(map[string]GroupChatRecord)
+		chatNode.groups = make(map[string][]GroupChatRecord)
+		chatNode.friendRequest = make(map[string]Null)
+		chatNode.invitation = make(map[string][]InvitationPair)
+		chatNode.sentFriendRequest = make(map[string]string)
+	}
 	if knownIp == "" {
-		chatNode.node.Create()
+		done := make(chan bool, 1)
+		go func() {
+			chatNode.node.Create()
+			done <- true
+		}()
+		select {
+		case <-done:
+		case <-time.After(1 * time.Second):
+			return errors.New("Create error.")
+		}
 	} else {
 		ok = chatNode.node.Join(knownIp)
 		if !ok {
 			return errors.New("Join error.")
 		}
 	}
-	chatNode.node.RPC.Register("Chat", &RPCWrapper{chatNode})
 	time.Sleep(500 * time.Millisecond) //使得数据转移
-	for true {
-		ok, _ := chatNode.node.Get(name)
-		if ok {
-			PrintCentre("Name existed, please change a new one.", "red")
-			PrintCentre("Type:", "yellow")
-			name = Scan('\n')
-			chatNode.name = name
-		} else {
-			break
+	if register {
+		for true {
+			ok, _ := chatNode.node.Get(name)
+			if ok {
+				PrintCentre("Name existed, please change a new one.", "red")
+				PrintCentre("Type:", "yellow")
+				name = Scan('\n')
+				chatNode.name = name
+			} else {
+				break
+			}
+		}
+	} else {
+		for {
+			ok, accountString := chatNode.node.Get(name)
+			if ok {
+				accountRecord := AccountRecord{}
+				err := json.Unmarshal([]byte(accountString), &accountRecord)
+				if err != nil {
+					chatNode.node.Quit()
+					fmt.Println(err)
+					fmt.Println(accountRecord)
+					return errors.New("Account get error.")
+				}
+				if accountRecord.Online {
+					chatNode.node.Quit()
+					return errors.New("The account is online on other device now!")
+				}
+				chatNode.name = name
+				chatNode.accountSeed = accountRecord.AccountSeed
+				break
+			} else {
+				PrintCentre("The account isn't exsited, please check again!", "red")
+				PrintCentre("Type account name:", "yellow")
+				name = Scan('\n')
+			}
+		}
+		for {
+			ok, chatNodeRecordString := chatNode.node.Get(chatNode.accountSeed + password)
+			if ok {
+				chatNodeRecord := ChatNodeRecord{}
+				err := json.Unmarshal([]byte(chatNodeRecordString), &chatNodeRecord)
+				if err != nil {
+					chatNode.node.Quit()
+					fmt.Println(err)
+					fmt.Println(chatNodeRecordString)
+					return errors.New("Account info get error.")
+				}
+				chatNode.password = password
+				chatNode.friendList = chatNodeRecord.FriendList
+				chatNode.friendPrivateChat = chatNodeRecord.FriendPrivateChat
+				chatNode.groups = chatNodeRecord.Groups
+				chatNode.friendRequest = chatNodeRecord.FriendRequest
+				chatNode.invitation = chatNodeRecord.Invitation
+				chatNode.sentFriendRequest = chatNodeRecord.SentFriendRequest
+				break
+			} else {
+				PrintCentre("The password is wrong! please check again!", "red")
+				PrintCentre("Type password:", "yellow")
+				password = Scan('\n')
+			}
 		}
 	}
-	chord.Setmode("overwrite")
-	for i := 1; i <= 5; i++ {
-		ok = chatNode.node.Put(name, ip)
-		if ok {
-			return nil
-		}
+	jsonInfo, _ := json.Marshal(AccountRecord{true, ip, chatNode.accountSeed})
+	ok = chatNode.node.Put(name, string(jsonInfo))
+	if !ok {
+		chatNode.node.Quit()
+		return errors.New("Account put error.")
 	}
-	return errors.New("IP put error.")
+	return nil
 }
 
 // 登出
 func (chatNode *ChatNode) LogOut() {
+	jsonInfo, _ := json.Marshal(AccountRecord{false, chatNode.node.IP, chatNode.accountSeed})
+	ok := chatNode.node.Put(chatNode.name, string(jsonInfo))
+	if !ok {
+		PrintCentre("Save account error!", "red")
+	}
+	jsonInfo, _ = json.Marshal(ChatNodeRecord{chatNode.friendList, chatNode.friendPrivateChat,
+		chatNode.groups, chatNode.friendRequest, chatNode.sentFriendRequest, chatNode.invitation})
+	ok = chatNode.node.Put(chatNode.accountSeed+chatNode.password, string(jsonInfo))
+	if !ok {
+		PrintCentre("Save account error!", "red")
+	}
+	time.Sleep(1 * time.Second)
 	chatNode.node.Quit()
 }
 
@@ -145,11 +235,11 @@ func (chatNode *ChatNode) SendFriendRequest(friendName string) error {
 	if ok && friendIp != "Accepted" && friendIp != "Rejected" {
 		return errors.New("You have sent the request to this user. Please wait friend to confirm.")
 	}
-	ok, friendIp = chatNode.node.Get(friendName)
-	if !ok {
-		return errors.New("Not existed user.")
+	friendIp, _, err := chatNode.getUserAccount(friendName)
+	if err != nil {
+		return err
 	}
-	err := chatNode.node.RPC.RemoteCall(friendIp, "Chat.AcceptFriendRequest", chatNode.name, &Null{})
+	err = chatNode.node.RPC.RemoteCall(friendIp, "Chat.AcceptFriendRequest", chatNode.name, &Null{})
 	if err != nil {
 		return err
 	}
@@ -171,12 +261,12 @@ func (chatNode *ChatNode) CheckFriendRequest(friendName string, agree bool) erro
 	chatNode.friendRequestLock.Lock()
 	delete(chatNode.friendRequest, friendName)
 	chatNode.friendRequestLock.Unlock()
-	ok, friendIp := chatNode.node.Get(friendName)
-	if !ok {
-		return errors.New("Get IP error.")
+	friendIp, _, err := chatNode.getUserAccount(friendName)
+	if err != nil {
+		return err
 	}
 	privateChat := GroupChatRecord{time.Now(), randString(60)}
-	err := chatNode.node.RPC.RemoteCall(friendIp, "Chat.SendBackFriendRequest",
+	err = chatNode.node.RPC.RemoteCall(friendIp, "Chat.SendBackFriendRequest",
 		SendBackPair{agree, chatNode.name, privateChat.GroupSeed, privateChat.GroupStartTime}, &Null{})
 	if err != nil {
 		return err
@@ -323,12 +413,8 @@ func (chatNode *ChatNode) CheckInvitation(pair InvitationPair, agree bool) error
 // 向群聊发送聊天信息
 func (chatNode *ChatNode) SendChatInfo(info string, groupChat GroupChatRecord) error {
 	sendTime := time.Now()
-	jsonInfo, err := json.Marshal(InfoRecord{chatNode.name, sendTime, info})
-	if err != nil {
-		return err
-	}
-	chord.Setmode("append")
-	ok := chatNode.node.Put(getGroupIp(groupChat.GroupSeed, groupChat.GroupStartTime, sendTime), string(jsonInfo)+"\n")
+	jsonInfo, _ := json.Marshal(InfoRecord{chatNode.name, sendTime, info})
+	ok := chatNode.node.PutMode(getGroupIp(groupChat.GroupSeed, groupChat.GroupStartTime, sendTime), string(jsonInfo)+"\n", "append")
 	if !ok {
 		return errors.New("Send info error.")
 	}
@@ -342,7 +428,7 @@ func (chatNode *ChatNode) GetChatInfo(groupChat GroupChatRecord, beginTime, endT
 	infos := []InfoRecord{}
 	for nowTime := beginTime; groupIpEnd != groupIpNow; nowTime = nowTime.Add(groupIdValidTime) {
 		groupIpNow = getGroupIp(groupChat.GroupSeed, groupChat.GroupStartTime, nowTime)
-		_, jsonInfo := chatNode.node.Get(groupIpNow)
+		_, jsonInfo := chatNode.node.GetMode(groupIpNow, "append")
 		infoTmp, err := parseToInfoRecord(jsonInfo)
 		if err != nil {
 			return infos, err
@@ -356,10 +442,20 @@ func (chatNode *ChatNode) GetChatInfo(groupChat GroupChatRecord, beginTime, endT
 func (chatNode *ChatNode) GetEarlierChatInfoTime(groupChat GroupChatRecord, beginTime time.Time) (time.Time, error) {
 	timeNow := beginTime.Add(-groupIdValidTime)
 	for timeNow.After(groupChat.GroupStartTime) {
-		ok, _ := chatNode.node.Get(getGroupIp(groupChat.GroupSeed, groupChat.GroupStartTime, timeNow))
+		ok, _ := chatNode.node.GetMode(getGroupIp(groupChat.GroupSeed, groupChat.GroupStartTime, timeNow), "append")
 		if ok {
 			return timeNow, nil
 		}
 	}
 	return time.Time{}, errors.New("No more records.")
 }
+
+// func (chatNode *ChatNode) Put(key string, info []byte, control string) bool {
+// 	fmt.Println(string(info))
+// 	chatNode.putModeLock.Lock()
+// 	chord.Setmode(control)
+// 	ok := chatNode.node.Put(key, string(info))
+// 	chord.Setmode("overwrite")
+// 	chatNode.putModeLock.Unlock()
+// 	return ok
+// }

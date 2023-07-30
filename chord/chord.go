@@ -50,7 +50,7 @@ type Node struct {
 
 // 整体初始化
 func init() {
-	//f, _ := os.Create("dht-test2.//log")
+	//f, _ := os.Create("DHT.log")
 	//logrus.SetOutput(f)
 	initCal()
 }
@@ -208,8 +208,9 @@ func (node *Node) ForceQuit() {
 	//logrus.Infof("Node (IP = %s, ID = %v) force quits.", node.IP, node.ID)
 }
 
-// 存入数据
+// 存入数据（默认Put，覆盖）
 func (node *Node) Put(key, value string) bool {
+	key = key + OVERWRITE
 	id := getHash(key)
 	ip, _ := node.FindSuccessor(id)
 	err := node.RPC.RemoteCall(ip, "Chord.PutInAll", []DataPair{{key, ValuePair{value, id}}}, &Null{})
@@ -221,8 +222,23 @@ func (node *Node) Put(key, value string) bool {
 	return true
 }
 
-// 查询数据
+// 存入数据（可设置模式 覆盖overwrite/添加append）
+func (node *Node) PutMode(key, value, mode string) bool {
+	key = key + GetMode(mode)
+	id := getHash(key)
+	ip, _ := node.FindSuccessor(id)
+	err := node.RPC.RemoteCall(ip, "Chord.PutInAll", []DataPair{{key, ValuePair{value, id}}}, &Null{})
+	if err != nil {
+		//logrus.Errorf("Node (IP = %s) putting in data error (key = %s, value = %s): %v.", node.IP, key, value, err)
+		return false
+	}
+	//logrus.Infof("Node (IP = %s) puts in data : key = %s, value = %s.", node.IP, key, value)
+	return true
+}
+
+// 查询数据 (默认模式，覆盖）
 func (node *Node) Get(key string) (ok bool, value string) {
+	key = key + OVERWRITE
 	id := getHash(key)
 	node.preLock.RLock()
 	pre := node.predecessor
@@ -238,12 +254,53 @@ func (node *Node) Get(key string) (ok bool, value string) {
 		}
 		ok = true
 	}
-	//logrus.Infof("Node (IP = %s) gets out data : key = %s, value = %s.", node.IP, key, value)
+	if ok {
+		//logrus.Infof("Node (IP = %s) gets out data : key = %s, value = %s.", node.IP, key, value)
+	}
 	return ok, value
 }
 
-// 删除数据
+// 查询数据（可设置模式 覆盖overwrite/添加append）
+func (node *Node) GetMode(key, mode string) (ok bool, value string) {
+	key = key + GetMode(mode)
+	id := getHash(key)
+	node.preLock.RLock()
+	pre := node.predecessor
+	node.preLock.RUnlock()
+	if belong(false, true, getHash(pre), node.ID, id) {
+		value, ok = node.GetOut(key)
+	} else {
+		ip, _ := node.FindSuccessor(id)
+		err := node.RPC.RemoteCall(ip, "Chord.GetOut", key, &value)
+		if err != nil {
+			//logrus.Errorf("Node (IP = %s) getting out data error (key = %s, value = %s): %v.", node.IP, key, value, err)
+			return false, ""
+		}
+		ok = true
+	}
+	if ok {
+		//logrus.Infof("Node (IP = %s) gets out data : key = %s, value = %s.", node.IP, key, value)
+	}
+	return ok, value
+}
+
+// 删除数据（默认模式 覆盖overwrite）
 func (node *Node) Delete(key string) bool {
+	key = key + OVERWRITE
+	id := getHash(key)
+	ip, _ := node.FindSuccessor(id)
+	err := node.RPC.RemoteCall(ip, "Chord.DeleteOffAll", []string{key}, &Null{})
+	if err != nil {
+		//logrus.Errorf("Node (IP = %s) deleting off data error (key = %s): %v.", node.IP, key, err)
+		return false
+	}
+	//logrus.Infof("Node (IP = %s) delete off data : key = %s.", node.IP, key)
+	return true
+}
+
+// 删除数据（可设置模式 覆盖overwrite/添加append）
+func (node *Node) DeleteMode(key, mode string) bool {
+	key = key + GetMode(mode)
 	id := getHash(key)
 	ip, _ := node.FindSuccessor(id)
 	err := node.RPC.RemoteCall(ip, "Chord.DeleteOffAll", []string{key}, &Null{})
@@ -363,8 +420,13 @@ func (node *Node) closestPrecedingFinger(id *big.Int) string {
 
 // 测试节点是否上线
 func (node *Node) Ping(ip string) bool {
-	err := node.RPC.RemoteCall(ip, "Chord.Ping", Null{}, &Null{})
-	return err == nil
+	for i := 1; i <= 2; i++ {
+		err := node.RPC.RemoteCall(ip, "Chord.Ping", Null{}, &Null{})
+		if err == nil {
+			return true
+		}
+	}
+	return false
 }
 
 // 修护前驱后继，并相应地转移数据
@@ -606,7 +668,7 @@ func (node *Node) PutIn(data []DataPair) error {
 		if !ok {
 			node.data[data[i].Key] = data[i].Values
 		} else {
-			node.data[data[i].Key] = dataPut(node.data[data[i].Key], data[i].Values)
+			node.data[data[i].Key] = dataPut(node.data[data[i].Key], data[i].Values, (data[i].Key)[len(data[i].Key)-1])
 		}
 	}
 	node.dataLock.Unlock()
@@ -617,7 +679,13 @@ func (node *Node) PutIn(data []DataPair) error {
 func (node *Node) PutInBackup(data []DataPair) error {
 	node.dataBackupLock.Lock()
 	for i := range data {
-		node.dataBackup[data[i].Key] = data[i].Values
+		_, ok := node.dataBackup[data[i].Key]
+		if !ok {
+			node.dataBackup[data[i].Key] = data[i].Values
+		} else {
+			node.dataBackup[data[i].Key] = dataPut(node.dataBackup[data[i].Key], data[i].Values, (data[i].Key)[len(data[i].Key)-1])
+		}
+
 	}
 	node.dataBackupLock.Unlock()
 	return nil

@@ -88,13 +88,13 @@ func (nodeRpc *NodeRpc) RemoteCall(ip string, serviceMethod string, args interfa
 		return errors.New("Offline node server (IP = " + ip + ").")
 	}
 	client, err := nodeRpc.getClient(ip)
-	defer nodeRpc.returnClient(ip, client)
 	if err != nil {
 		//logrus.Errorf("Getting client error (server IP = %s): %v.", ip, err)
 		if client != nil {
 			client.Close()
 			client = nil
 		}
+		nodeRpc.returnClient(ip, client)
 		return err
 	}
 	done := make(chan error, 1)
@@ -105,9 +105,15 @@ func (nodeRpc *NodeRpc) RemoteCall(ip string, serviceMethod string, args interfa
 	case err := <-done:
 		if err != nil {
 			//logrus.Errorf("Calling error (server IP = %s): %v.", ip, err)
+			if serviceMethod[len(serviceMethod)-4:] == "Ping" {
+				client.Close()
+				client = nil
+			}
+			nodeRpc.returnClient(ip, client)
 			return err
 		} else {
 			//logrus.Infof("Call done (server IP = %s, serviceMethod = %s).", ip, serviceMethod)
+			nodeRpc.returnClient(ip, client)
 			return nil
 		}
 	case <-time.After(CallTimeOut):
@@ -115,6 +121,7 @@ func (nodeRpc *NodeRpc) RemoteCall(ip string, serviceMethod string, args interfa
 			client.Close()
 			client = nil
 		}
+		nodeRpc.returnClient(ip, client)
 		return errors.New("Call time out.") // 超时
 	}
 }

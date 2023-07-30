@@ -8,18 +8,25 @@ import (
 
 // 主程序
 func Chat() {
-	node := new(ChatNode)
+	PrintCentre("Create a new account/Login the existed account?", "yellow")
+	PrintCentre("Type Y(y)/N(n):", "yellow")
+	register := getSelection()
 	PrintCentre("Please type your name:", "yellow")
 	userName := Scan('\n')
 	PrintCentre("Please type your IP:", "yellow")
 	userIp := Scan('\n')
-	PrintCentre("Creat/Join?", "yellow")
-	PrintCentre("Type Y(y)/N(n):", "yellow")
-	tmp := Scan('\n')
-	flag := (tmp == "Y" || tmp == "y")
+	PrintCentre("Please type your password:", "yellow")
+	password := Scan('\n')
+	create := false
+	if register {
+		PrintCentre("Creat/Join?", "yellow")
+		PrintCentre("Type Y(y)/N(n):", "yellow")
+		create = getSelection()
+	}
 	var err error
-	if flag {
-		err = node.Login(userName, userIp, "")
+	node := new(ChatNode)
+	if create {
+		err = node.Login(userName, userIp, password, "", register)
 		if err != nil {
 			PrintCentre(err.Error(), "red")
 		} else {
@@ -28,7 +35,7 @@ func Chat() {
 	} else {
 		PrintCentre("Please type the node IP (the node is in the P2P chat system):", "yellow")
 		enterIp := Scan('\n')
-		err = node.Login(userName, userIp, enterIp)
+		err = node.Login(userName, userIp, password, enterIp, register)
 		if err != nil {
 			PrintCentre(err.Error(), "red")
 		} else {
@@ -236,6 +243,8 @@ func (chatNode *ChatNode) viewFriendList() string {
 							fmt.Println(flushPadding)
 							if selectedFriendNum == 0 {
 								PrintCentre("You have not selecte any friend yet!", "red")
+							} else if cursorLen == 0 {
+								PrintCentre("You haven't been in any chat group yet.", "red")
 							} else {
 								PrintCentre("Sending invitation to "+strconv.Itoa(selectedFriendNum)+" friends", "yellow")
 								for i, selected := range selectedFriend {
@@ -607,8 +616,8 @@ func (chatNode *ChatNode) viewFriendRequest() string {
 					if status == 1 && cursorLen > 0 {
 						fmt.Println(flushPadding)
 						PrintCentre("Do you agree? Please type Y(y)/N(n):", "yellow")
-						agree := Scan('\n')
-						err := chatNode.CheckFriendRequest(list[cursorIndex], (agree == "Y" || agree == "y"))
+						agree := getSelection()
+						err := chatNode.CheckFriendRequest(list[cursorIndex], agree)
 						fmt.Println(flushPadding)
 						if err != nil {
 							PrintCentre(err.Error(), "red")
@@ -621,8 +630,8 @@ func (chatNode *ChatNode) viewFriendRequest() string {
 						if status == 2 && cursorLen > 0 {
 							fmt.Println(flushPadding)
 							PrintCentre("Delete the accepted/rejected record? Please type Y(y)/N(n):", "yellow")
-							agree := Scan('\n')
-							if agree == "Y" || agree == "y" {
+							agree := getSelection()
+							if agree {
 								err := chatNode.DeleteSentRequest(list[cursorIndex])
 								fmt.Println(flushPadding)
 								if err != nil {
@@ -739,8 +748,8 @@ func (chatNode *ChatNode) viewGroupChatInvitation() string {
 			} else {
 				fmt.Println(flushPadding)
 				PrintCentre("Do you agree? Please type Y(y)/N(n):", "yellow")
-				agree := Scan('\n')
-				err := chatNode.CheckInvitation(list[cursorIndex], (agree == "Y" || agree == "y"))
+				agree := getSelection()
+				err := chatNode.CheckInvitation(list[cursorIndex], agree)
 				fmt.Println(flushPadding)
 				if err != nil {
 					PrintCentre(err.Error(), "red")
@@ -847,6 +856,7 @@ func (chatNode *ChatNode) help() string {
 				red.Println("! If you don't select any friends, you will get error message, and you need to select again.")
 				red.Println("! If you don't have any chat group and try to press enter, you will get error message. You need to creat a new group first.")
 				red.Println("! You cannot send invitation to the friend which has been in the group already.")
+				red.Println("! You cannot send invitation to the friend which has been reveived the invitation to the group. You should wait him/her to confirm.")
 			} else if cursorIndex == 4 {
 				return "homepage"
 			}

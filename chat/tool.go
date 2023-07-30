@@ -181,3 +181,29 @@ func moveCursor(len, cursorIndex int, control string) int {
 		return cursorIndex
 	}
 }
+
+// 得到用户账号的IP和上线情况
+func (chatNode *ChatNode) getUserAccount(friendName string) (string, bool, error) {
+	friendAccount := AccountRecord{}
+	ok, friendAccountString := chatNode.node.Get(friendName)
+	if !ok {
+		return "", false, errors.New("Not existed user!")
+	}
+	err := json.Unmarshal([]byte(friendAccountString), &friendAccount)
+	if err != nil {
+		return "", false, errors.New("Parse error!")
+	}
+	return friendAccount.IP, friendAccount.Online, nil
+}
+
+// 输入Y/y，返回true；输入N/n，返回false
+func getSelection() bool {
+	for {
+		control := Scan('\n')
+		if control == "Y" || control == "y" {
+			return true
+		} else if control == "N" || control == "n" {
+			return false
+		}
+	}
+}
