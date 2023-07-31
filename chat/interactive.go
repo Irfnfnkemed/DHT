@@ -278,7 +278,11 @@ func (chatNode *ChatNode) viewFriendList() string {
 									if selected {
 										err := chatNode.InviteFriend(friendList[i], listTmp[cursorIndex], list[cursorIndex])
 										if err != nil {
-											PrintCentre("Fail to send invitation to "+friendList[i]+": "+err.Error(), "red")
+											if err.Error() == "Pending." {
+												PrintCentre("The friend "+friendList[i]+" is not online. The invitation will be sent automatically after he/she login.", "blue")
+											} else {
+												PrintCentre("Fail to send invitation to "+friendList[i]+": "+err.Error(), "red")
+											}
 										} else {
 											PrintCentre("Successfully send invitation to "+friendList[i], "green")
 										}
@@ -783,12 +787,18 @@ func (chatNode *ChatNode) viewGroupChatInvitation() string {
 				if err != nil {
 					PrintCentre(err.Error(), "red")
 				} else {
-					PrintCentre("Successfully enter the group ", "green")
+					if agree {
+						PrintCentre("Successfully enter the group.", "green")
+					} else {
+						PrintCentre("Reject to enter the group.", "red")
+					}
 				}
 				flush = true
 			}
 			PrintCentre("Type anything to continue.", "white")
 			Scan('\n')
+		} else {
+			cursorIndex = moveCursor(cursorLen, cursorIndex, control)
 		}
 	}
 }
