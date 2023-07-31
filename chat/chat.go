@@ -217,6 +217,50 @@ func (chatNode *ChatNode) LogOut() {
 	chatNode.node.Quit()
 }
 
+// 重新登入时，获取未成功被对方接收的请求，并不断尝试发送
+func (chatNode *ChatNode) RestartSendTry() {
+	sendList := []string{}
+	chatNode.sentFriendRequestLock.RLock()
+	for name, status := range chatNode.sentFriendRequest {
+		if status == "Pending" {
+			sendList = append(sendList, name)
+		}
+	}
+	chatNode.sentFriendRequestLock.RUnlock()
+	for _, name := range sendList {
+		go chatNode.TrySendFriendRequest(name)
+	}
+	sendBackList := make(map[string]SendBackPair)
+	chatNode.friendRequestLock.RLock()
+	for name, sendBack := range chatNode.friendRequest {
+		if sendBack.ChatSeed != "" {
+			sendBackList[name] = sendBack
+		}
+	}
+	chatNode.friendRequestLock.RUnlock()
+	for name, sendBack := range sendBackList {
+		go chatNode.TrySendBackFriendRequest(name, sendBack)
+	}
+	invitationList := []InvitationPair{}
+	chatNode.sentInvitationLock.RLock()
+	for _, invitations := range chatNode.sentInvitation {
+		invitationList = append(invitationList, invitations...)
+	}
+	chatNode.sentInvitationLock.RUnlock()
+	for _, pair := range invitationList {
+		go func(pair InvitationPair) {
+			for chatNode.online {
+				err := chatNode.TryInvite(pair)
+				if err == nil || err.Error() == "User has been in that group chat already." ||
+					err.Error() == "User has received the invitation. Please wait him/her to confirm." {
+					return
+				}
+				time.Sleep(trySendCircle)
+			}
+		}(pair)
+	}
+}
+
 // 向用户发送好友请求，并将请求存入已发送记录中
 func (chatNode *ChatNode) SendFriendRequest(friendName string) error {
 	if friendName == chatNode.name {
@@ -241,7 +285,7 @@ func (chatNode *ChatNode) SendFriendRequest(friendName string) error {
 		return errors.New("You have sent the request to this user. Please wait friend to confirm.")
 	}
 	go chatNode.TrySendFriendRequest(friendName)
-	time.Sleep(250 * time.Millisecond)
+	time.Sleep(50 * time.Millisecond)
 	return nil
 }
 
@@ -259,7 +303,7 @@ func (chatNode *ChatNode) CheckFriendRequest(friendName string, agree bool) erro
 	chatNode.friendRequestLock.Unlock()
 	privateChat := GroupChatRecord{time.Now(), randString(60)}
 	go chatNode.TrySendBackFriendRequest(friendName, SendBackPair{agree, chatNode.name, privateChat.GroupSeed, privateChat.GroupStartTime})
-	time.Sleep(250 * time.Millisecond)
+	time.Sleep(50 * time.Millisecond)
 	if agree {
 		chatNode.friendLock.Lock()
 		chatNode.friendList[friendName] = privateChat
@@ -290,6 +334,50 @@ func (chatNode *ChatNode) SendBackFriendRequest(pair SendBackPair) error {
 		return nil
 	}
 	return errors.New("Request was rejeceted.")
+}
+
+// 不断尝试发送好友请求，直至接收
+func (chatNode *ChatNode) TrySendFriendRequest(friendName string) {
+	chatNode.sentFriendRequestLock.Lock()
+	chatNode.sentFriendRequest[friendName] = "Pending"
+	chatNode.sentFriendRequestLock.Unlock()
+	for chatNode.online {
+		friendIp, _, err := chatNode.getUserAccount(friendName)
+		if err != nil {
+			time.Sleep(trySendCircle)
+			continue
+		}
+		err = chatNode.node.RPC.RemoteCall(friendIp, "Chat.AcceptFriendRequest", chatNode.name, &Null{})
+		if err == nil {
+			chatNode.sentFriendRequestLock.Lock()
+			chatNode.sentFriendRequest[friendName] = "To be confirmed"
+			chatNode.sentFriendRequestLock.Unlock()
+			return
+		}
+		time.Sleep(trySendCircle)
+	}
+}
+
+// 不断尝试发送好友请求确认情况，直至接收
+func (chatNode *ChatNode) TrySendBackFriendRequest(friendName string, pair SendBackPair) {
+	chatNode.friendRequestLock.Lock()
+	chatNode.friendRequest[friendName] = pair //表示已经确认，但对方还未接收
+	chatNode.friendRequestLock.Unlock()
+	for chatNode.online {
+		friendIp, _, err := chatNode.getUserAccount(friendName)
+		if err != nil {
+			time.Sleep(trySendCircle)
+			continue
+		}
+		err = chatNode.node.RPC.RemoteCall(friendIp, "Chat.SendBackFriendRequest", pair, &Null{})
+		if err == nil {
+			chatNode.friendRequestLock.Lock()
+			delete(chatNode.friendRequest, friendName)
+			chatNode.friendRequestLock.Unlock()
+			return
+		}
+		time.Sleep(trySendCircle)
+	}
 }
 
 // 得到好友列表和私聊列表
@@ -435,6 +523,35 @@ func (chatNode *ChatNode) CheckInvitation(pair InvitationPair, agree bool) error
 	return nil
 }
 
+// 单次尝试发送群聊邀请
+func (chatNode *ChatNode) TryInvite(pair InvitationPair) error {
+	friendIp, _, err := chatNode.getUserAccount(pair.ToName)
+	if err != nil {
+		return err
+	}
+	err = chatNode.node.RPC.RemoteCall(friendIp, "Chat.AcceptInvitation", pair, &Null{})
+	if err == nil || err.Error() == "User has been in that group chat already." ||
+		err.Error() == "User has received the invitation. Please wait him/her to confirm." {
+		chatNode.sentInvitationLock.Lock()
+		sentInvitations, ok := chatNode.sentInvitation[pair.GroupChatName]
+		if ok {
+			for i, sentInvitation := range sentInvitations {
+				if sentInvitation.GroupSeed == pair.GroupSeed && sentInvitation.ToName == pair.ToName {
+					sentInvitations = append(sentInvitations[:i], sentInvitations[i+1:]...)
+					break
+				}
+			}
+		}
+		if len(sentInvitations) == 0 {
+			delete(chatNode.sentInvitation, pair.GroupChatName)
+		} else {
+			chatNode.sentInvitation[pair.GroupChatName] = sentInvitations
+		}
+		chatNode.sentInvitationLock.Unlock()
+	}
+	return err
+}
+
 // 向群聊发送聊天信息
 func (chatNode *ChatNode) SendChatInfo(info string, groupChat GroupChatRecord) error {
 	sendTime := time.Now()
@@ -473,120 +590,4 @@ func (chatNode *ChatNode) GetEarlierChatInfoTime(groupChat GroupChatRecord, begi
 		}
 	}
 	return time.Time{}, errors.New("No more records.")
-}
-
-// 不断尝试发送好友请求，直至接收
-func (chatNode *ChatNode) TrySendFriendRequest(friendName string) {
-	chatNode.sentFriendRequestLock.Lock()
-	chatNode.sentFriendRequest[friendName] = "Pending"
-	chatNode.sentFriendRequestLock.Unlock()
-	for chatNode.online {
-		friendIp, _, err := chatNode.getUserAccount(friendName)
-		if err != nil {
-			time.Sleep(trySendCircle)
-			continue
-		}
-		err = chatNode.node.RPC.RemoteCall(friendIp, "Chat.AcceptFriendRequest", chatNode.name, &Null{})
-		if err == nil {
-			chatNode.sentFriendRequestLock.Lock()
-			chatNode.sentFriendRequest[friendName] = "To be confirmed"
-			chatNode.sentFriendRequestLock.Unlock()
-			return
-		}
-		time.Sleep(trySendCircle)
-	}
-}
-
-// 不断尝试发送好友请求确认情况，直至接收
-func (chatNode *ChatNode) TrySendBackFriendRequest(friendName string, pair SendBackPair) {
-	chatNode.friendRequestLock.Lock()
-	chatNode.friendRequest[friendName] = pair //表示已经确认，但对方还未接收
-	chatNode.friendRequestLock.Unlock()
-	for chatNode.online {
-		friendIp, _, err := chatNode.getUserAccount(friendName)
-		if err != nil {
-			time.Sleep(trySendCircle)
-			continue
-		}
-		err = chatNode.node.RPC.RemoteCall(friendIp, "Chat.SendBackFriendRequest", pair, &Null{})
-		if err == nil {
-			chatNode.friendRequestLock.Lock()
-			delete(chatNode.friendRequest, friendName)
-			chatNode.friendRequestLock.Unlock()
-			return
-		}
-		time.Sleep(trySendCircle)
-	}
-}
-
-func (chatNode *ChatNode) RestartSendTry() {
-	sendList := []string{}
-	chatNode.sentFriendRequestLock.RLock()
-	for name, status := range chatNode.sentFriendRequest {
-		if status == "Pending" {
-			sendList = append(sendList, name)
-		}
-	}
-	chatNode.sentFriendRequestLock.RUnlock()
-	for _, name := range sendList {
-		go chatNode.TrySendFriendRequest(name)
-	}
-	sendBackList := make(map[string]SendBackPair)
-	chatNode.friendRequestLock.RLock()
-	for name, sendBack := range chatNode.friendRequest {
-		if sendBack.ChatSeed != "" {
-			sendBackList[name] = sendBack
-		}
-	}
-	chatNode.friendRequestLock.RUnlock()
-	for name, sendBack := range sendBackList {
-		go chatNode.TrySendBackFriendRequest(name, sendBack)
-	}
-	invitationList := []InvitationPair{}
-	chatNode.sentInvitationLock.RLock()
-	for _, invitations := range chatNode.sentInvitation {
-		invitationList = append(invitationList, invitations...)
-	}
-	chatNode.sentInvitationLock.RUnlock()
-	for _, pair := range invitationList {
-		go func(pair InvitationPair) {
-			for chatNode.online {
-				err := chatNode.TryInvite(pair)
-				if err == nil || err.Error() == "User has been in that group chat already." ||
-					err.Error() == "User has received the invitation. Please wait him/her to confirm." {
-					return
-				}
-				time.Sleep(trySendCircle)
-			}
-		}(pair)
-	}
-
-}
-
-func (chatNode *ChatNode) TryInvite(pair InvitationPair) error {
-	friendIp, _, err := chatNode.getUserAccount(pair.ToName)
-	if err != nil {
-		return err
-	}
-	err = chatNode.node.RPC.RemoteCall(friendIp, "Chat.AcceptInvitation", pair, &Null{})
-	if err == nil || err.Error() == "User has been in that group chat already." ||
-		err.Error() == "User has received the invitation. Please wait him/her to confirm." {
-		chatNode.sentInvitationLock.Lock()
-		sentInvitations, ok := chatNode.sentInvitation[pair.GroupChatName]
-		if ok {
-			for i, sentInvitation := range sentInvitations {
-				if sentInvitation.GroupSeed == pair.GroupSeed && sentInvitation.ToName == pair.ToName {
-					sentInvitations = append(sentInvitations[:i], sentInvitations[i+1:]...)
-					break
-				}
-			}
-		}
-		if len(sentInvitations) == 0 {
-			delete(chatNode.sentInvitation, pair.GroupChatName)
-		} else {
-			chatNode.sentInvitation[pair.GroupChatName] = sentInvitations
-		}
-		chatNode.sentInvitationLock.Unlock()
-	}
-	return err
 }

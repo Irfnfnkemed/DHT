@@ -26,7 +26,7 @@ func main() {
 			chat.Chat()
 			return
 		} else {
-			color.New(color.FgRed).Println("Name error! Please type again.")
+			color.New(color.FgRed).Println("Error! Please type again.")
 		}
 	}
 }

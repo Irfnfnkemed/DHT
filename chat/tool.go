@@ -70,6 +70,15 @@ func setStrings() {
 	rightArrow = fmt.Sprintf("\x1B\x5B\x43")
 }
 
+// 打印Logo
+func printLogo() {
+	PrintCentre("__         __", "yellow")
+	PrintCentre("/ /___   ___\\ \\", "yellow")
+	PrintCentre("/  ___/   \\___  \\", "yellow")
+	PrintCentre("/_____/     \\_____\\", "yellow")
+	fmt.Print("\n")
+}
+
 // 得到hash值
 func getHash(ip string) *big.Int {
 	hash := sha1.Sum([]byte(ip))
@@ -206,12 +215,4 @@ func getSelection() bool {
 			return false
 		}
 	}
-}
-
-func printLogo() {
-	PrintCentre("__         __", "yellow")
-	PrintCentre("/ /___   ___\\ \\", "yellow")
-	PrintCentre("/  ___/   \\___  \\", "yellow")
-	PrintCentre("/_____/     \\_____\\", "yellow")
-	fmt.Print("\n")
 }
