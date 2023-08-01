@@ -284,9 +284,17 @@ func (chatNode *ChatNode) SendFriendRequest(friendName string) error {
 	if ok && status != "Accepted" && status != "Rejected" {
 		return errors.New("You have sent the request to this user. Please wait friend to confirm.")
 	}
+	_, online, err := chatNode.getUserAccount(friendName)
+	if err != nil && err.Error() == "Not existed user!" {
+		return err
+	}
 	go chatNode.TrySendFriendRequest(friendName)
 	time.Sleep(50 * time.Millisecond)
-	return nil
+	if online {
+		return nil
+	} else {
+		return errors.New("Pending.")
+	}
 }
 
 // 接收好友请求，存入待确认列表
@@ -331,9 +339,8 @@ func (chatNode *ChatNode) SendBackFriendRequest(pair SendBackPair) error {
 		chatNode.friendLock.Lock()
 		chatNode.friendList[pair.FromName] = GroupChatRecord{pair.ChatStartTime, pair.ChatSeed}
 		chatNode.friendLock.Unlock()
-		return nil
 	}
-	return errors.New("Request was rejeceted.")
+	return nil
 }
 
 // 不断尝试发送好友请求，直至接收

@@ -21,14 +21,7 @@ func Chat() {
 		fmt.Println(flushPadding)
 		printLogo()
 		PrintCentre("Welcome to WGJ's P2P chat!", "yellow")
-		for i := 0; i < 4; i++ {
-			if i == cursorIndex {
-				blue.Print(cursor)
-			} else {
-				fmt.Print(cursorPadding)
-			}
-			fmt.Println(consoleCommand[i])
-		}
+		printConsole(4, cursorIndex, consoleCommand)
 		fmt.Println(separator)
 		PrintCentre("Press up/down arrow to move the cursor.", "magenta")
 		PrintCentre("Press enter to confirm.", "magenta")
@@ -116,14 +109,7 @@ func (chatNode *ChatNode) homepage() string {
 		fmt.Println(separator)
 		PrintCentre("Press up/down arrow to move the cursor.", "magenta")
 		PrintCentre("Press enter to confirm.", "magenta")
-		for i := 0; i < 7; i++ {
-			if cursorIndex == i {
-				cyan.Print(cursor)
-			} else {
-				fmt.Print(cursorPadding)
-			}
-			fmt.Println(consoleCommand[i])
-		}
+		printConsole(7, cursorIndex, consoleCommand)
 		control := Scan('\n')
 		if control == "" {
 			if cursorIndex == 0 {
@@ -191,18 +177,7 @@ func (chatNode *ChatNode) viewFriendList() string {
 		PrintCentre("Select friends through friendList cursor.", "magenta")
 		PrintCentre("Press enter to confirm.", "magenta")
 		PrintCentre("Press Tab clear the friends selections.", "magenta")
-		for i := 0; i < 4; i++ {
-			if consoleCursorIndex == i {
-				if selectFriendCursor {
-					fmt.Print(cursor)
-				} else {
-					cyan.Print(cursor)
-				}
-			} else {
-				fmt.Print(cursorPadding)
-			}
-			fmt.Println(consoleCommand[i])
-		}
+		printConsoleSelected(4, consoleCursorIndex, consoleCommand, selectFriendCursor)
 		control := Scan('\n')
 		if control == "" {
 			if selectFriendCursor {
@@ -457,14 +432,13 @@ func (chatNode *ChatNode) viewGroupChatList() string {
 		for i := 0; i < 4; i++ {
 			if i == consoleCursorIndex {
 				if selectGroup {
-					fmt.Print(cursor)
+					fmt.Println(cursor + consoleCommand[i])
 				} else {
-					cyan.Print(cursor)
+					cyan.Println(cursor + consoleCommand[i])
 				}
 			} else {
-				fmt.Print(cursorPadding)
+				fmt.Println(cursorPadding + consoleCommand[i])
 			}
-			fmt.Println(consoleCommand[i])
 		}
 		control := Scan('\n')
 		if control == leftArrow {
@@ -558,175 +532,182 @@ func (chatNode *ChatNode) viewFriendRequest() string {
 	cursorIndex := 0
 	cursorLen := 0
 	consoleCursorIndex := 0
-	status := 0 //0表初始状态，1表待确认列表，2表已发送列表
-	selectRequest := false
 	list := []string{}
 	listTmp := []string{}
-	consoleCommand := []string{"Back to homepage", "Help"}
+	consoleCommand := []string{"Requests to confirm", "Requests have sent", "Back to homepage", "Help"}
 	for {
 		fmt.Println(flushPadding)
-		if status == 0 {
-			chatNode.friendRequestLock.RLock()
-			friendRequestLen := len(chatNode.friendRequest)
-			chatNode.friendRequestLock.RUnlock()
-			chatNode.sentFriendRequestLock.RLock()
-			sentFriendRequestLen := len(chatNode.sentFriendRequest)
-			chatNode.sentFriendRequestLock.RUnlock()
-			PrintCentre(strconv.Itoa(friendRequestLen)+" requests to confirm.", "yellow")
-			PrintCentre(strconv.Itoa(sentFriendRequestLen)+" requests were sent.", "yellow")
-		} else if status == 1 {
-			if cursorLen == 0 {
-				PrintCentre("No friend request!", "red")
-			} else {
-				PrintCentre("Friend requests to confirm:", "yellow")
-				for i, name := range list {
-					if i == cursorIndex {
-						if selectRequest {
-							cyan.Print(cursor)
-						} else {
-							fmt.Print(cursor)
-						}
-					} else {
-						fmt.Print(cursorPadding)
-					}
-					yellow.Println(name)
-				}
-			}
-		} else if status == 2 {
-			if cursorLen == 0 {
-				PrintCentre("No request was sent!", "red")
-			} else {
-				PrintCentre("Friend requests have sent:", "yellow")
-				for i, name := range list {
-					if i == cursorIndex {
-						if selectRequest {
-							cyan.Print(cursor)
-						} else {
-							fmt.Print(cursor)
-						}
-					} else {
-						fmt.Print(cursorPadding)
-					}
-					yellow.Print(name)
-					fmt.Print(" --- ")
-					if listTmp[i] == "Accepted" {
-						green.Println("Accepted")
-					} else if listTmp[i] == "Rejected" {
-						red.Println("Rejected")
-					} else {
-						yellow.Println("To be confirmed")
-					}
-				}
-			}
-		}
+
+		chatNode.friendRequestLock.RLock()
+		friendRequestLen := len(chatNode.friendRequest)
+		chatNode.friendRequestLock.RUnlock()
+		chatNode.sentFriendRequestLock.RLock()
+		sentFriendRequestLen := len(chatNode.sentFriendRequest)
+		chatNode.sentFriendRequestLock.RUnlock()
+		PrintCentre(strconv.Itoa(friendRequestLen)+" requests to confirm.", "yellow")
+		PrintCentre(strconv.Itoa(sentFriendRequestLen)+" requests were sent.", "yellow")
 		fmt.Println(separator)
 		PrintCentre("Press up/down arrow to move the cursor.", "magenta")
-		PrintCentre("Press left/right arrow to get the friendRequest/console cursor.", "magenta")
 		PrintCentre("Press enter to confirm.", "magenta")
-		PrintCentre("Press Tab to shift between (requests to confirm / requests have sent).", "magenta")
-		for i := 0; i < 2; i++ {
-			if consoleCursorIndex == i {
-				if selectRequest {
-					fmt.Print(cursor)
-				} else {
-					cyan.Print(cursor)
-				}
-			} else {
-				fmt.Print(cursorPadding)
-			}
-			fmt.Println(consoleCommand[i])
-		}
+		printConsole(4, consoleCursorIndex, consoleCommand)
+
 		control := Scan('\n')
-		if control == leftArrow {
-			selectRequest = true
-		} else if control == rightArrow {
-			selectRequest = false
-		} else if control == "" || control == string('\t') {
-			if control == "" {
-				if selectRequest {
-					if status == 1 && cursorLen > 0 {
+		if control == "" {
+			if consoleCursorIndex == 0 {
+				flush := true
+				for {
+					if flush {
+						chatNode.friendRequestLock.RLock()
+						list = list[:0]
+						for name, sent := range chatNode.friendRequest {
+							if sent.ChatSeed == "" {
+								list = append(list, name)
+							}
+						}
+						chatNode.friendRequestLock.RUnlock()
+						cursorIndex = 0
+						cursorLen = len(list)
+						consoleCursorIndex = 0
+						flush = false
+					}
+					fmt.Println(flushPadding)
+					if cursorLen == 0 {
+						PrintCentre("No friend request!", "red")
+					} else {
+						PrintCentre("Friend requests to confirm:", "yellow")
+						for i, name := range list {
+							if i == cursorIndex {
+								cyan.Println(cursor + name)
+							} else {
+								fmt.Println(cursorPadding + name)
+							}
+						}
+					}
+					fmt.Println(separator)
+					PrintCentre("Press up/down arrow to move the cursor.", "magenta")
+					PrintCentre("Press left arrow to return to superior page.", "magenta")
+					PrintCentre("Press enter to select the request you want to confirm.", "magenta")
+					control := Scan('\n')
+					if control == leftArrow {
+						break
+					} else if control == "" {
 						fmt.Println(flushPadding)
+						if cursorLen == 0 {
+							PrintCentre("No friend request!", "red")
+							PrintCentre("Type anything to continue.", "white")
+							Scan('\n')
+							continue
+						}
 						PrintCentre("Do you agree? Please type Y(y)/N(n):", "yellow")
 						agree := getSelection()
 						err := chatNode.CheckFriendRequest(list[cursorIndex], agree)
 						fmt.Println(flushPadding)
 						if err != nil {
 							PrintCentre(err.Error(), "red")
-						} else {
+						} else if agree {
 							PrintCentre("Successfully accept the request.", "green")
+						} else {
+							PrintCentre("Rejected the request.", "red")
 						}
+						flush = true
 						PrintCentre("Type anything to continue.", "white")
 						Scan('\n')
 					} else {
-						if status == 2 && cursorLen > 0 {
-							fmt.Println(flushPadding)
-							PrintCentre("Delete the accepted/rejected record? Please type Y(y)/N(n):", "yellow")
-							agree := getSelection()
-							if agree {
-								err := chatNode.DeleteSentRequest(list[cursorIndex])
-								fmt.Println(flushPadding)
-								if err != nil {
-									PrintCentre(err.Error(), "red")
-								} else {
-									PrintCentre("Successfully accept the request.", "green")
-								}
-								PrintCentre("Type anything to continue.", "white")
-								Scan('\n')
+						cursorIndex = moveCursor(cursorLen, cursorIndex, control)
+					}
+				}
+			} else if consoleCursorIndex == 1 {
+				flush := true
+				for {
+					if flush {
+						chatNode.sentFriendRequestLock.RLock()
+						list = list[:0]
+						listTmp = listTmp[:0]
+						for name, value := range chatNode.sentFriendRequest {
+							list = append(list, name)
+							if value == "Accepted" || value == "Rejected" {
+								listTmp = append(listTmp, value)
+							} else {
+								listTmp = append(listTmp, "To be confirmed")
+							}
+						}
+						chatNode.sentFriendRequestLock.RUnlock()
+						cursorIndex = 0
+						cursorLen = len(list)
+						consoleCursorIndex = 0
+						flush = false
+					}
+					fmt.Println(flushPadding)
+					if cursorLen == 0 {
+						PrintCentre("No request was sent!", "red")
+					} else {
+						PrintCentre("Friend requests have sent:", "yellow")
+						for i, name := range list {
+							if i == cursorIndex {
+								cyan.Print(cursor)
+							} else {
+								fmt.Print(cursorPadding)
+							}
+							yellow.Print(name)
+							fmt.Print(" --- ")
+							if listTmp[i] == "Accepted" {
+								green.Println("Accepted")
+							} else if listTmp[i] == "Rejected" {
+								red.Println("Rejected")
+							} else {
+								yellow.Println("To be confirmed")
 							}
 						}
 					}
-				} else {
-					if consoleCursorIndex == 0 {
-						return "homepage"
-					} else if consoleCursorIndex == 1 {
-						chatNode.help()
-					}
-				}
-			}
-			if !(control == "" && !selectRequest) {
-				if (control == "" && status == 1) ||
-					(control == string('\t') && (status == 0 || status == 2)) {
-					chatNode.friendRequestLock.RLock()
-					list = list[:0]
-					for name, sent := range chatNode.friendRequest {
-						if sent.ChatSeed == "" {
-							list = append(list, name)
+					fmt.Println(separator)
+					PrintCentre("Press up/down arrow to move the cursor.", "magenta")
+					PrintCentre("Press left arrow to return to superior page.", "magenta")
+					PrintCentre("Press enter to select the request record you want to delete.", "magenta")
+
+					control := Scan('\n')
+
+					if control == leftArrow {
+						break
+					} else if control == "" {
+						fmt.Println(flushPadding)
+						if cursorLen == 0 {
+							PrintCentre("No request was sent!", "red")
+							PrintCentre("Type anything to continue.", "white")
+							Scan('\n')
+							continue
 						}
-					}
-					chatNode.friendRequestLock.RUnlock()
-					cursorIndex = 0
-					cursorLen = len(list)
-					consoleCursorIndex = 0
-					selectRequest = false
-					status = 1
-				} else if (control == "" && status == 2) || (control == string('\t') && status == 1) {
-					chatNode.sentFriendRequestLock.RLock()
-					list = list[:0]
-					listTmp = listTmp[:0]
-					for name, value := range chatNode.sentFriendRequest {
-						list = append(list, name)
-						if value == "Accepted" || value == "Rejected" {
-							listTmp = append(listTmp, value)
-						} else {
-							listTmp = append(listTmp, "To be confirmed")
+						PrintCentre("Delete the accepted/rejected record?", "yellow")
+						PrintCentre("Please type Y(y)/N(n):", "yellow")
+						agree := getSelection()
+						if agree {
+							err := chatNode.DeleteSentRequest(list[cursorIndex])
+							fmt.Println(flushPadding)
+							if err != nil {
+								PrintCentre(err.Error(), "red")
+							} else {
+								PrintCentre("Successfully accept the request.", "green")
+							}
+							flush = true
+							PrintCentre("Type anything to continue.", "white")
+							Scan('\n')
 						}
+					} else {
+						cursorIndex = moveCursor(cursorLen, cursorIndex, control)
 					}
-					chatNode.sentFriendRequestLock.RUnlock()
-					cursorIndex = 0
-					cursorLen = len(list)
-					consoleCursorIndex = 0
-					selectRequest = false
-					status = 2
+
 				}
+
+			} else if consoleCursorIndex == 2 {
+				return "homepage"
+			} else if consoleCursorIndex == 3 {
+				chatNode.help()
 			}
 		} else {
-			if selectRequest {
-				cursorIndex = moveCursor(cursorLen, cursorIndex, control)
-			} else {
-				consoleCursorIndex = moveCursor(2, consoleCursorIndex, control)
-			}
+			consoleCursorIndex = moveCursor(4, consoleCursorIndex, control)
 		}
+
 	}
+
 }
 
 // 查看群聊邀请
@@ -818,9 +799,13 @@ func (chatNode *ChatNode) addNewFriend() string {
 		err := chatNode.SendFriendRequest(name)
 		fmt.Println(flushPadding)
 		if err != nil {
-			PrintCentre(err.Error(), "red")
+			if err.Error() == "Pending." {
+				PrintCentre("The user "+name+" is not online. The request will be sent automatically after he/she login.", "blue")
+			} else {
+				PrintCentre(err.Error(), "red")
+			}
 		} else {
-			PrintCentre("Request was sent successfully.", "green")
+			PrintCentre("Request was sent to "+name+" successfully.", "green")
 		}
 		PrintCentre("Type anything to continue.", "white")
 		Scan('\n')
@@ -832,6 +817,7 @@ func (chatNode *ChatNode) help() string {
 	cursorIndex := 0
 	consoleCommand := []string{"How to login?", "How to add new friend?",
 		"How to create a new chat group?", "How to invite my friends to chat group?",
+		"How to chat privately with my friend?",
 		"Return to superior page"}
 	for {
 		fmt.Println(flushPadding)
@@ -839,35 +825,38 @@ func (chatNode *ChatNode) help() string {
 		fmt.Println(separator)
 		PrintCentre("Press up/down arrow to move the cursor.", "magenta")
 		PrintCentre("Press enter to confirm.", "magenta")
-		for i := 0; i < 5; i++ {
-			if i == cursorIndex {
-				cyan.Print(cursor)
-			} else {
-				fmt.Print(cursorPadding)
-			}
-			fmt.Println(consoleCommand[i])
-		}
+		printConsole(6, cursorIndex, consoleCommand)
 		control := Scan('\n')
 		if control == "" {
 			if cursorIndex == 0 {
 				fmt.Println(flushPadding)
-				yellow.Println("To login, you need type in your name and IP first.")
-				yellow.Println("If you want to join in an existed P2P system, you need to type in the IP of a node that is currently online in that system." +
-					" If you just want to create a new P2P system, you needn't do that.")
+				yellow.Print("If you want to login the registed account")
+				green.Print("(Login to an existing account)")
+				yellow.Println(", you need type in account's name, your current IP and account's password correctly first. " +
+					"Then you need to type in the IP of a node that is currently online in that system.")
+				yellow.Print("If you don't have an account, you can register an account first")
+				green.Print("(Register a new account)")
+				yellow.Println(". Type in new account's name, your current IP and new account's password. " +
+					"If you want the account to join in an existed P2P system, you need to type in the IP of a node that is currently online in that system. " +
+					"If you just want to create a new P2P system, you needn't do that.")
+				blue.Println("* Please ensure that the IP you type in is correct, otherwise unknown situations may occur.")
+				blue.Println("* After creating the P2P system, please ensure that at least one server is always online in the system, otherwise all data will be lost.")
 				red.Println("! The user name cannot be repeated. If you type in a name that is existed, you will get error message and you should type in a new name.")
+				red.Println("! If you type in the password incorrectly, you cannot login successfully. You need type again.")
+				red.Println("! An account cannot login to multiple devices simultaneously.")
 			} else if cursorIndex == 1 {
 				fmt.Println(flushPadding)
 				yellow.Print("To add a new friend, you should go to ")
 				green.Print("homepage -> Add new friend")
 				yellow.Print(".\nType in the name of the user you want to add as your friend. The requset will be sent to the user, and you can view its status in ")
-				green.Print("homepage -> View friend request")
+				green.Print("homepage -> View friend request -> Requests have sent")
 				yellow.Println(".")
 				red.Println("! You cannot send request to the user which is not existed.")
 				red.Println("! You cannot send request to yourself.")
 				red.Println("! You cannot send request to your friend.")
 				red.Println("! You cannot send request to the user which you have sent request already. You should wait that user to confirm your request.")
 				red.Print("! You cannot send request to the user which you have already received the request from that user. You should go to ")
-				magenta.Print("homepage -> View friend request")
+				magenta.Print("homepage -> View friend request -> Requests to confirm")
 				red.Println(" to check your friend request list.")
 			} else if cursorIndex == 2 {
 				fmt.Println(flushPadding)
@@ -876,7 +865,7 @@ func (chatNode *ChatNode) help() string {
 				green.Print("homepage -> View group chat list -> Create a new group chat")
 				yellow.Println(", than type in the new chat group name.")
 				yellow.Print("2. Go to ")
-				green.Print("homepage -> View friend list ->Invite selected friends to group chat")
+				green.Print("homepage -> View friend list -> Invite selected friends to group chat")
 				yellow.Println(", than press right arrow, typing in the new chat group name.")
 				blue.Println("* The name of chat group can be repeated.")
 			} else if cursorIndex == 3 {
@@ -897,12 +886,20 @@ func (chatNode *ChatNode) help() string {
 				red.Println("! You cannot send invitation to the friend which has been in the group already.")
 				red.Println("! You cannot send invitation to the friend which has been reveived the invitation to the group. You should wait him/her to confirm.")
 			} else if cursorIndex == 4 {
+				fmt.Println(flushPadding)
+				yellow.Print("To chat with friends privately, you should go to ")
+				green.Print("homepage -> View friend list")
+				yellow.Print(". Move the cursor and press enter to select the friend you want to chat with. Then go to ")
+				green.Print("(homepage -> View friend list) -> Chat privately with selected friends")
+				yellow.Println(". Now you can chat with your friend privately.")
+				blue.Println("* You can get more historical messages of the chat by pressing uparrow.")
+			} else if cursorIndex == 5 {
 				return "homepage"
 			}
 			fmt.Println("Type anything to return to superior page.")
 			Scan('\n')
 		} else {
-			cursorIndex = moveCursor(5, cursorIndex, control)
+			cursorIndex = moveCursor(6, cursorIndex, control)
 		}
 	}
 }

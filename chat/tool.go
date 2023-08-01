@@ -79,6 +79,30 @@ func printLogo() {
 	fmt.Print("\n")
 }
 
+func printConsole(len, cursorIndex int, consoleCommand []string) {
+	for i := 0; i < len; i++ {
+		if i == cursorIndex {
+			cyan.Println(cursor + consoleCommand[i])
+		} else {
+			fmt.Println(cursorPadding + consoleCommand[i])
+		}
+	}
+}
+
+func printConsoleSelected(len, cursorIndex int, consoleCommand []string, selected bool) {
+	for i := 0; i < len; i++ {
+		if i == cursorIndex {
+			if selected {
+				fmt.Println(cursor + consoleCommand[i])
+			} else {
+				cyan.Println(cursor + consoleCommand[i])
+			}
+		} else {
+			fmt.Println(cursorPadding + consoleCommand[i])
+		}
+	}
+}
+
 // 得到hash值
 func getHash(ip string) *big.Int {
 	hash := sha1.Sum([]byte(ip))
